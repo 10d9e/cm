@@ -34,8 +34,4 @@ Each entry captures:
 
 Do **not** commit files under `history/entries/` in your PR.
 
-## For maintainers
-
-Entries are append-only. Never rewrite or delete past entries.
-
-See [`CONTRIBUTING.md`](../CONTRIBUTING.md) and [`.github/workflows/scorekeeper.yml`](../.github/workflows/scorekeeper.yml).
+Ledger entries are append-only — never rewrite or delete past entries.

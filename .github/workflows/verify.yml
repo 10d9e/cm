@@ -45,10 +45,10 @@ jobs:
         run: |
           score="$(grep '^SCORE:' /tmp/eval.out || echo 'SCORE: unknown')"
           prev="$(awk -F'|' '
-            NR>2 {
-              gsub(/ /,"",$4)
-              if ($4 ~ /^[0-9]+$/) {
-                if (best=="" || $4+0 < best+0) best=$4
+            /^\| [0-9]/ {
+              gsub(/ /,"",$5)
+              if ($5 ~ /^[0-9]+$/) {
+                if (best=="" || $5+0 < best+0) best=$5
               }
             }
             END { print best }

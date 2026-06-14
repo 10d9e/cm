@@ -19,12 +19,18 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 2
+          # The ledger push targets protected `main`. The default GITHUB_TOKEN
+          # (github-actions[bot]) cannot bypass the branch ruleset on a personal
+          # repo, so use SCOREKEEPER_PAT (a maintainer/admin token) when present;
+          # its push bypasses as an admin. Falls back to the default token.
+          token: ${{ secrets.SCOREKEEPER_PAT || github.token }}
+          persist-credentials: true
 
       - uses: dtolnay/rust-toolchain@stable
 
       - name: Record verified submission
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.SCOREKEEPER_PAT || github.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_SHA: ${{ github.sha }}
           GITHUB_ACTOR: ${{ github.actor }}

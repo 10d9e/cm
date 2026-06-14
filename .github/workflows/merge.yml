@@ -10,7 +10,10 @@ on:
   workflow_run:
     workflows: [Verify PR]
     types: [completed]
-    branches: [main]
+    # NOTE: no `branches:` filter. For workflow_run, that filter matches the
+    # *head branch* of the triggering run, which for a PR is the feature branch,
+    # not `main` — so filtering on main would skip every PR. The job `if` below
+    # restricts to successful pull_request runs instead.
 
 permissions:
   contents: write

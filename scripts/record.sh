@@ -104,12 +104,17 @@ entry_id="$(printf '%04d' "$next")"
 # Previous record = lowest SCORE in RESULTS.md (numeric rows only).
 prev_score=""
 while IFS= read -r line; do
-  s="$(echo "$line" | awk -F'|' '{gsub(/ /,"",$4); print $4}')"
+  # Data rows look like: | 0001 | date | @author | 642822 | ...
+  case "$line" in
+    "| "[0-9]*) ;;
+    *) continue ;;
+  esac
+  s="$(echo "$line" | awk -F'|' '{gsub(/ /,"",$5); print $5}')"
   [[ "$s" =~ ^[0-9]+$ ]] || continue
   if [[ -z "$prev_score" || "$s" -lt "$prev_score" ]]; then
     prev_score="$s"
   fi
-done < <(grep '|' RESULTS.md | tail -n +3)
+done < RESULTS.md
 
 if [[ -n "$prev_score" ]]; then
   delta=$((score - prev_score))
@@ -177,7 +182,20 @@ if [[ ${#note} -gt 80 ]]; then
   short_note="${short_note}…"
 fi
 
-echo "| ${entry_id} | ${date_iso} | ${author} | ${score} | ${delta_str} | ${vs_zstd} | \`${commit}\` | [${entry_id}](history/entries/${entry_id}-${slug}.md) | ${short_note} |" >> RESULTS.md
+row="| ${entry_id} | ${date_iso} | ${author} | ${score} | ${delta_str} | ${vs_zstd} | \`${commit}\` | [${entry_id}](history/entries/${entry_id}-${slug}.md) | ${short_note} |"
+
+# Insert the row immediately after the last existing table line (so it lands
+# inside the markdown table, not after the footer text).
+tmp_results="$(mktemp)"
+awk -v row="$row" '
+  { lines[NR] = $0; if ($0 ~ /^\|/) last = NR }
+  END {
+    for (i = 1; i <= NR; i++) {
+      print lines[i]
+      if (i == last) print row
+    }
+  }
+' RESULTS.md > "$tmp_results" && mv "$tmp_results" RESULTS.md
 
 if [[ "$status" == "record" ]]; then
   if grep -q '^\*\*Current record:' RESULTS.md; then

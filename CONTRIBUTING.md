@@ -53,24 +53,29 @@ still auto-merges like any other passing submission — Scorekeeper marks the
 entry as **record**. Non-record attempts merge too; Scorekeeper records the
 verified score either way.
 
-## Branch protection (maintainers)
+## How merges are gated
 
-On `main`, enable:
+`main` is protected by a repository ruleset: every change must go through a PR
+and pass the **`verify`** status check. Competitors fork the repo, so they can
+only ever touch `main` through a gated PR.
 
-- Require pull request before merging
-- Require status check **Verify PR / verify**
-- Restrict who can push directly to `main`
-- **Do not** require approving reviews (verification is the gate)
+Flow: **Verify PR** passes → **Auto-merge** squash-merges (default
+`GITHUB_TOKEN`, via a `workflow_run` job) → **Scorekeeper** records the verified
+ledger. Local scores and hand-edited `RESULTS.md` / `history/entries/` are
+rejected by CI (`ci-scorekeeper.sh` fails any push that touches the ledger
+without a matching algorithm change).
 
-Auto-merge uses the default **`GITHUB_TOKEN`** via a separate **Auto-merge**
-workflow (`workflow_run` after **Verify PR** succeeds). That pattern runs in the
-base-repo context, so fork PRs merge without a PAT.
+### Maintainer setup
 
-In **Settings → Actions → General → Workflow permissions**, choose **Read and
-write permissions** for the default `GITHUB_TOKEN`.
-
-Flow: **Verify PR** passes → **Auto-merge** squash-merges → **Scorekeeper**
-commits the ledger.
+- **Ruleset `main-gate`** on `main`: require a PR + the `verify` check, block
+  force-push and deletion, with the **Repository admin** role allowed to bypass.
+- **`SCOREKEEPER_PAT` secret** (required for automated ledger commits): a token
+  belonging to a repo admin (fine-grained PAT with **Contents: read & write** on
+  this repo is recommended). Scorekeeper pushes the ledger with it so the commit
+  bypasses the ruleset. Without it, Scorekeeper falls back to the default token,
+  which **cannot** push to protected `main` on a personal repo — record entries
+  would have to be pushed by an admin.
+- **Actions → Workflow permissions**: Read and write.
 
 ## Questions
 
