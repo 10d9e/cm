@@ -8,7 +8,7 @@
 
 use super::tables::{build, squash_d};
 
-const NCTX: usize = 11; // context models: orders 0..8 + word + sparse
+const NCTX: usize = 12; // context models: orders 0..9 + word + sparse
 const NINPUT: usize = NCTX + 2; // + two match models (order-6 and order-8)
 const TBITS: u32 = 22;
 const TSIZE: usize = 1 << TBITS;
@@ -211,6 +211,19 @@ impl Cm {
             )
         } else {
             hashk(0xA00, c4)
+        };
+        self.ctxhash[11] = if self.pos >= 9 {
+            hashk(
+                0xB00,
+                c4.wrapping_mul(0xc2b2_ae35)
+                    ^ ((self.b(self.pos - 5) as u32).wrapping_mul(0x27d4_eb2f))
+                    ^ ((self.b(self.pos - 6) as u32).wrapping_mul(0x1656_67b1))
+                    ^ ((self.b(self.pos - 7) as u32).wrapping_mul(0x85eb_ca6b))
+                    ^ ((self.b(self.pos - 8) as u32).wrapping_mul(0x9E37_79B1))
+                    ^ ((self.b(self.pos - 9) as u32).wrapping_mul(0xff51_afd7)),
+            )
+        } else {
+            hashk(0xB00, c4)
         };
     }
 
