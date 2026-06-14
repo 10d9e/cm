@@ -3,6 +3,9 @@ name: Scorekeeper
 on:
   push:
     branches: [main]
+    # Only the algorithm can change the score — ignore docs/site/ledger pushes.
+    paths:
+      - src/algorithm/**
   # Manual recovery hatch: re-run the authoritative score for the current main
   # HEAD (e.g. if a merge push did not trigger this workflow).
   workflow_dispatch:

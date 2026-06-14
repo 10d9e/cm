@@ -140,7 +140,7 @@ function renderGrid(data) {
 
   // newest first
   const rows = [...data.entries].reverse();
-  $("#grid").innerHTML = rows
+  const body = rows
     .map((e) => {
       const user = (e.author || "").replace(/^@/, "");
       const avatar = user
@@ -151,32 +151,41 @@ function renderGrid(data) {
       const commitUrl = `https://github.com/${repo}/commit/${e.commit}`;
       const entryUrl = e.entryPath ? `https://github.com/${repo}/blob/main/${e.entryPath}` : "";
       const entryLink = entryUrl
-        ? `<a href="${entryUrl}" target="_blank" rel="noopener">Full entry →</a>`
+        ? `<a href="${entryUrl}" target="_blank" rel="noopener" title="Full entry">entry</a>`
         : "";
       return `
-      <article class="card ${e.isRecord ? "record" : ""}">
-        <div class="card-top">
-          <img class="avatar" src="${avatar}" alt="${escapeHtml(e.author)}" loading="lazy"
+      <tr class="${e.isRecord ? "record" : ""}">
+        <td class="c-id">#${e.id}</td>
+        <td class="c-author">
+          <img class="avatar" src="${avatar}" alt="" loading="lazy"
                onerror="this.style.visibility='hidden'" />
-          <div class="who">
-            <span class="author"><a href="${profile}" target="_blank" rel="noopener">${escapeHtml(e.author)}</a></span>
-            <span class="meta">${escapeHtml(e.date)}</span>
-          </div>
-          <span class="rank">#${e.id}</span>
-        </div>
-        <div class="score-row">
-          <span class="score">${fmt(e.score)}</span>
-          <span class="badge ${deltaClass}">${escapeHtml(e.delta)}</span>
-          <span class="badge zstd">zstd ${escapeHtml(e.vsZstd)}</span>
-        </div>
-        <p class="note">${renderNote(e.note)}</p>
-        <div class="card-foot">
-          <a class="sha" href="${commitUrl}" target="_blank" rel="noopener">${escapeHtml(e.commit)}</a>
+          <a href="${profile}" target="_blank" rel="noopener">${escapeHtml(e.author)}</a>
+        </td>
+        <td class="c-score">${fmt(e.score)}</td>
+        <td class="c-delta"><span class="badge ${deltaClass}">${escapeHtml(e.delta)}</span></td>
+        <td class="c-zstd">${escapeHtml(e.vsZstd)}</td>
+        <td class="c-note"><div class="note">${renderNote(e.note)}</div></td>
+        <td class="c-links">
+          <a class="sha" href="${commitUrl}" target="_blank" rel="noopener" title="Commit">${escapeHtml(e.commit)}</a>
           ${entryLink}
-        </div>
-      </article>`;
+        </td>
+      </tr>`;
     })
     .join("");
+
+  $("#grid").innerHTML = `
+    <thead>
+      <tr>
+        <th class="c-id">#</th>
+        <th class="c-author">Committer</th>
+        <th class="c-score">SCORE</th>
+        <th class="c-delta">Δ vs record</th>
+        <th class="c-zstd">vs zstd</th>
+        <th class="c-note">Comment</th>
+        <th class="c-links">Links</th>
+      </tr>
+    </thead>
+    <tbody>${body}</tbody>`;
 }
 
 async function main() {
