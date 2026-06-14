@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>cm — compression leaderboard</title>
+  <meta name="description" content="Live leaderboard for the cm lossless compressor competition." />
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" />
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <div class="bg-grid" aria-hidden="true"></div>
+
+  <header class="site-header">
+    <div class="wrap">
+      <div class="brand">
+        <span class="logo">cm</span>
+        <div>
+          <h1>Compression Leaderboard</h1>
+          <p class="tagline">Smaller is better — total compressed bytes over the fixed corpus.</p>
+        </div>
+      </div>
+      <a class="repo-link" id="repoLink" href="#" target="_blank" rel="noopener">View on GitHub →</a>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <section class="stats" id="stats" aria-label="Summary statistics"></section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Score over time</h2>
+        <span class="hint">lower = better</span>
+      </div>
+      <div class="chart-box">
+        <canvas id="scoreChart"></canvas>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Submissions</h2>
+        <span class="hint" id="entryCount"></span>
+      </div>
+      <div class="grid" id="grid"></div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="wrap">
+      <span>Ledger is CI-only — updated automatically on every verified merge to <code>main</code>.</span>
+      <span id="generatedAt"></span>
+    </div>
+  </footer>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+  <script src="./app.js"></script>
+</body>
+</html>
