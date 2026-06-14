@@ -29,7 +29,12 @@ jobs:
     steps:
       - name: Merge verified PR
         env:
-          GH_TOKEN: ${{ github.token }}
+          # Merge with the maintainer PAT (falling back to the default token) so
+          # the resulting push to main triggers Scorekeeper. Pushes attributed to
+          # GITHUB_TOKEN do NOT start new workflow runs. This step runs trusted
+          # base-repo code only (never untrusted PR code), so using the PAT here
+          # does not expose it to submissions.
+          GH_TOKEN: ${{ secrets.SCOREKEEPER_PAT || github.token }}
           VERIFIED_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
           set -euo pipefail

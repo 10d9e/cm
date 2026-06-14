@@ -3,6 +3,9 @@ name: Scorekeeper
 on:
   push:
     branches: [main]
+  # Manual recovery hatch: re-run the authoritative score for the current main
+  # HEAD (e.g. if a merge push did not trigger this workflow).
+  workflow_dispatch:
 
 concurrency:
   group: scorekeeper-main
