@@ -9,7 +9,12 @@ echo "== boundary guard =="
 bash scripts/guard.sh
 
 echo "== correctness gate (round-trip tests) =="
-cargo test --release --quiet 2>&1 | tail -n 5
+if ! cargo test --release 2>/tmp/cm_test.log; then
+  echo "TESTS FAILED — candidate is INVALID:"
+  tail -n 30 /tmp/cm_test.log
+  exit 1
+fi
+grep -E "test result" /tmp/cm_test.log | grep -v "0 passed" || true
 
 echo "== build =="
 cargo build --release --quiet
