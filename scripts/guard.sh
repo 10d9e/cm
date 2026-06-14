@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Boundary guard: fail if anything outside src/algorithm/ (or RESULTS.md) was
-# changed relative to the committed baseline, or if the frozen contract
+# Boundary guard: fail if anything outside src/algorithm/, RESULTS.md, or
+# history/entries/ was changed relative to the committed baseline, or if the frozen contract
 # signatures were altered. FROZEN — do not edit as part of autoresearch.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -16,6 +16,7 @@ while IFS= read -r f; do
   case "$f" in
     src/algorithm/*) ;;
     RESULTS.md) ;;
+    history/entries/*) ;;
     *) violations+=("$f") ;;
   esac
 done < <( { git diff --name-only HEAD; git ls-files --others --exclude-standard; } | sort -u )
@@ -23,7 +24,7 @@ done < <( { git diff --name-only HEAD; git ls-files --others --exclude-standard;
 if (( ${#violations[@]} )); then
   echo "BOUNDARY VIOLATION — these frozen files were modified:"
   printf '  %s\n' "${violations[@]}"
-  echo "Only src/algorithm/ (and RESULTS.md) may change."
+  echo "Only src/algorithm/, RESULTS.md, and history/entries/ may change."
   exit 1
 fi
 

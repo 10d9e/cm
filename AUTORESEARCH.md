@@ -66,7 +66,7 @@ Everything else, including:
 - `AUTORESEARCH.md`
 
 The boundary is enforced by `scripts/guard.sh`, which fails if any file outside
-`src/algorithm/` (other than `RESULTS.md`) differs from the committed baseline.
+`src/algorithm/`, `RESULTS.md`, or `history/entries/` differs from the committed baseline.
 
 ## Anti-cheat rules (these define "a real improvement")
 
@@ -99,11 +99,21 @@ rejected on review and may break on the hidden evaluation set.
    succeeds, all round-trip tests pass, and it prints a numeric `SCORE:`.
 3. If the new SCORE is lower than your best, keep the change; otherwise revert
    (`git checkout -- src/algorithm`).
-4. Append one line to `RESULTS.md`: the SCORE, the delta, and a short note on
-   what you changed.
-5. Occasionally run `cargo test` (debug build) — it additionally catches
+4. **Record the submission** so the repo remembers your approach:
+   ```
+   bash scripts/record.sh \
+     --author @your-github-handle \
+     --note "What you changed and why." \
+     --attempts "Optional: things you tried and reverted."
+   ```
+   This writes a detailed entry under `history/entries/` and appends a row to
+   `RESULTS.md`. Append-only — never edit old history entries.
+5. Commit `src/algorithm/`, the new history entry, and `RESULTS.md` together.
+6. Occasionally run `cargo test` (debug build) — it additionally catches
    integer-overflow bugs that release mode silently wraps. Use `wrapping_*`
    ops anywhere values may overflow (hashes, the mixer, `c4`).
+
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the GitHub competition workflow.
 
 ## Leads, roughly by expected payoff
 
