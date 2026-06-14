@@ -10,7 +10,10 @@ if ! git rev-parse --git-dir >/dev/null 2>&1; then
   exit 2
 fi
 
-mapfile -t changed < <( { git diff --name-only HEAD; git ls-files --others --exclude-standard; } | sort -u )
+changed=()
+while IFS= read -r f; do
+  [[ -n "$f" ]] && changed+=("$f")
+done < <( { git diff --name-only HEAD; git ls-files --others --exclude-standard; } | sort -u )
 
 violations=()
 for f in "${changed[@]}"; do
