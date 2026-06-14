@@ -8,6 +8,9 @@ It is built to be improved by automated agents: the algorithm lives behind a
 fixed contract, and a frozen harness scores any candidate. See
 [`AUTORESEARCH.md`](AUTORESEARCH.md) for the rules.
 
+**[Live leaderboard →](https://10d9e.github.io/cm/)** — score chart and full
+submission history, updated automatically by CI on every verified merge.
+
 ## Layout
 
 ```
