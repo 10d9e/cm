@@ -30,14 +30,16 @@ jobs:
       - name: Merge verified PR
         env:
           GH_TOKEN: ${{ github.token }}
-          RUN_ID: ${{ github.event.workflow_run.id }}
           VERIFIED_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
           set -euo pipefail
-          pr="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}/pull_requests" \
-            --jq '.[0].number // empty')"
+          # Resolve the open PR from the verified head commit. (The PR is a field
+          # on the run, not a sub-resource — query by SHA so this also works for
+          # fork PRs.)
+          pr="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${VERIFIED_SHA}/pulls" \
+            --jq '[.[] | select(.state=="open")][0].number // empty' 2>/dev/null || true)"
           if [[ -z "$pr" ]]; then
-            echo "No pull request linked to workflow run ${RUN_ID}; nothing to merge."
+            echo "No open PR for ${VERIFIED_SHA}; nothing to merge."
             exit 0
           fi
 
