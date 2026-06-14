@@ -133,10 +133,30 @@ function renderChart(data) {
   });
 }
 
+function summarize(text) {
+  if (!text) return "";
+  return text
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/^\s*(\d+\.|[-*])\s*/gm, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function compactDelta(e) {
+  if (!e.delta || e.delta.includes("baseline")) return "—";
+  if (e.deltaValue != null) {
+    return e.isRecord ? `${e.deltaValue} ★` : String(e.deltaValue);
+  }
+  return e.delta.replace(/\s*\([^)]*\)/, "").trim();
+}
+
+let ENTRIES_BY_ID = {};
+
 function renderGrid(data) {
-  const repo = data.repo || "10d9e/cm";
   const total = data.entries.length;
   $("#entryCount").textContent = `${total} ${total === 1 ? "entry" : "entries"}`;
+  ENTRIES_BY_ID = Object.fromEntries(data.entries.map((e) => [e.id, e]));
 
   // newest first
   const rows = [...data.entries].reverse();
@@ -146,34 +166,30 @@ function renderGrid(data) {
       const avatar = user
         ? `https://github.com/${encodeURIComponent(user)}.png?size=80`
         : "";
-      const profile = user ? `https://github.com/${encodeURIComponent(user)}` : "#";
       const deltaClass = e.isRecord ? "good" : "flat";
-      const commitUrl = `https://github.com/${repo}/commit/${e.commit}`;
-      const entryUrl = e.entryPath ? `https://github.com/${repo}/blob/main/${e.entryPath}` : "";
-      const entryLink = entryUrl
-        ? `<a href="${entryUrl}" target="_blank" rel="noopener" title="Full entry">entry</a>`
-        : "";
       return `
-      <tr class="${e.isRecord ? "record" : ""}">
+      <tr class="${e.isRecord ? "record" : ""}" data-id="${e.id}" tabindex="0" role="button"
+          aria-label="View details for entry ${e.id}">
         <td class="c-id">#${e.id}</td>
         <td class="c-author">
           <img class="avatar" src="${avatar}" alt="" loading="lazy"
                onerror="this.style.visibility='hidden'" />
-          <a href="${profile}" target="_blank" rel="noopener">${escapeHtml(e.author)}</a>
+          <span class="aname">${escapeHtml(e.author)}</span>
         </td>
         <td class="c-score">${fmt(e.score)}</td>
-        <td class="c-delta"><span class="badge ${deltaClass}">${escapeHtml(e.delta)}</span></td>
+        <td class="c-delta"><span class="badge ${deltaClass}">${escapeHtml(compactDelta(e))}</span></td>
         <td class="c-zstd">${escapeHtml(e.vsZstd)}</td>
-        <td class="c-note"><div class="note">${renderNote(e.note)}</div></td>
-        <td class="c-links">
-          <a class="sha" href="${commitUrl}" target="_blank" rel="noopener" title="Commit">${escapeHtml(e.commit)}</a>
-          ${entryLink}
-        </td>
+        <td class="c-note"><span class="note-1">${escapeHtml(summarize(e.note))}</span></td>
+        <td class="c-open"><span class="open-btn">View ↗</span></td>
       </tr>`;
     })
     .join("");
 
   $("#grid").innerHTML = `
+    <colgroup>
+      <col class="w-id" /><col class="w-author" /><col class="w-score" />
+      <col class="w-delta" /><col class="w-zstd" /><col class="w-note" /><col class="w-open" />
+    </colgroup>
     <thead>
       <tr>
         <th class="c-id">#</th>
@@ -182,10 +198,76 @@ function renderGrid(data) {
         <th class="c-delta">Δ vs record</th>
         <th class="c-zstd">vs zstd</th>
         <th class="c-note">Comment</th>
-        <th class="c-links">Links</th>
+        <th class="c-open"></th>
       </tr>
     </thead>
     <tbody>${body}</tbody>`;
+
+  const open = (el) => {
+    const id = el.getAttribute("data-id");
+    if (id) openDialog(ENTRIES_BY_ID[id], data.repo || "10d9e/cm");
+  };
+  $("#grid").querySelectorAll("tbody tr").forEach((tr) => {
+    tr.addEventListener("click", () => open(tr));
+    tr.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter" || ev.key === " ") {
+        ev.preventDefault();
+        open(tr);
+      }
+    });
+  });
+}
+
+function dialogSection(title, html) {
+  if (!html) return "";
+  return `<section class="d-sec"><h3>${title}</h3>${html}</section>`;
+}
+
+function openDialog(e, repo) {
+  if (!e) return;
+  const user = (e.author || "").replace(/^@/, "");
+  const avatar = user ? `https://github.com/${encodeURIComponent(user)}.png?size=120` : "";
+  const profile = user ? `https://github.com/${encodeURIComponent(user)}` : "#";
+  const commitUrl = `https://github.com/${repo}/commit/${e.commit}`;
+  const entryUrl = e.entryPath ? `https://github.com/${repo}/blob/main/${e.entryPath}` : "";
+  const deltaClass = e.isRecord ? "good" : "flat";
+
+  $("#dialogInner").innerHTML = `
+    <button class="dialog-close" aria-label="Close" data-close>×</button>
+    <header class="dialog-head">
+      <img class="d-avatar" src="${avatar}" alt="" onerror="this.style.visibility='hidden'" />
+      <div class="d-head-text">
+        <div class="d-title">Entry #${e.id}
+          ${e.isRecord ? '<span class="badge good">record</span>' : ""}
+        </div>
+        <div class="d-sub">
+          <a href="${profile}" target="_blank" rel="noopener">${escapeHtml(e.author)}</a>
+          · ${escapeHtml(e.date)}
+        </div>
+      </div>
+    </header>
+
+    <div class="d-metrics">
+      <div class="d-metric"><span class="m-label">SCORE</span><span class="m-value">${fmt(e.score)}</span></div>
+      <div class="d-metric"><span class="m-label">Δ vs record</span><span class="m-value"><span class="badge ${deltaClass}">${escapeHtml(e.delta)}</span></span></div>
+      <div class="d-metric"><span class="m-label">vs zstd −22</span><span class="m-value">${escapeHtml(e.vsZstd)}</span></div>
+      <div class="d-metric"><span class="m-label">commit</span><span class="m-value"><a class="sha" href="${commitUrl}" target="_blank" rel="noopener">${escapeHtml(e.commit)}</a></span></div>
+    </div>
+
+    ${dialogSection("Approach", `<div class="note">${renderNote(e.approach)}</div>`)}
+    ${dialogSection("Iteration notes", `<div class="note">${renderNote(e.iterationNotes)}</div>`)}
+    ${dialogSection("Eval snapshot", e.evalSnapshot ? `<pre class="snapshot">${escapeHtml(e.evalSnapshot)}</pre>` : "")}
+
+    <footer class="dialog-foot">
+      ${entryUrl ? `<a href="${entryUrl}" target="_blank" rel="noopener">Open full entry on GitHub →</a>` : ""}
+    </footer>`;
+
+  const dlg = $("#entryDialog");
+  $("#dialogInner").querySelector("[data-close]").addEventListener("click", () => dlg.close());
+  if (typeof dlg.showModal === "function") dlg.showModal();
+  else dlg.setAttribute("open", "");
+  dlg.scrollTop = 0;
+  if (history.replaceState) history.replaceState(null, "", `#${e.id}`);
 }
 
 async function main() {
@@ -200,9 +282,22 @@ async function main() {
       $("#generatedAt").textContent = `Updated ${new Date(data.generatedAt).toLocaleString()}`;
     }
 
+    const dlg = $("#entryDialog");
+    dlg.addEventListener("click", (ev) => {
+      // close when the backdrop (the dialog element itself) is clicked
+      if (ev.target === dlg) dlg.close();
+    });
+    dlg.addEventListener("close", () => {
+      if (history.replaceState) history.replaceState(null, "", location.pathname + location.search);
+    });
+
     renderStats(data);
     renderChart(data);
     renderGrid(data);
+
+    // Deep link: #<entryId> opens that solution directly.
+    const hashId = location.hash.replace(/^#/, "");
+    if (hashId && ENTRIES_BY_ID[hashId]) openDialog(ENTRIES_BY_ID[hashId], data.repo || "10d9e/cm");
   } catch (err) {
     document.querySelector("main").innerHTML =
       `<div class="error">Could not load leaderboard data.<br><small>${escapeHtml(String(err))}</small></div>`;

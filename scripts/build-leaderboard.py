@@ -26,26 +26,45 @@ def cells(line: str) -> list[str]:
     return [c.strip() for c in line.strip().strip("|").split("|")]
 
 
-def approach_text(entry_rel: str) -> str:
-    """Return the full '## Approach' section of a history entry, if present."""
+def parse_entry(entry_rel: str) -> dict:
+    """Parse a history entry into its '##' sections plus metadata-table fields."""
+    result: dict = {"sections": {}, "meta": {}}
     if not entry_rel:
-        return ""
+        return result
     path = ROOT / entry_rel
     if not path.is_file():
-        return ""
+        return result
     text = path.read_text(encoding="utf-8")
-    out: list[str] = []
-    capturing = False
+
+    current = None
+    buf: list[str] = []
     for line in text.splitlines():
         if line.startswith("## "):
-            if line.strip().lower() == "## approach":
-                capturing = True
-                continue
-            if capturing:
-                break
-        elif capturing:
-            out.append(line)
-    return "\n".join(out).strip()
+            if current is not None:
+                result["sections"][current] = "\n".join(buf).strip()
+            current = line[3:].strip().lower()
+            buf = []
+            continue
+        if current is not None:
+            buf.append(line)
+        else:
+            # metadata table rows: | Field | Value |
+            m = re.match(r"^\|\s*([^|]+?)\s*\|\s*(.+?)\s*\|\s*$", line)
+            if m and m.group(1).lower() not in ("field", "-------"):
+                result["meta"][m.group(1).strip().lower()] = m.group(2).strip()
+    if current is not None:
+        result["sections"][current] = "\n".join(buf).strip()
+    return result
+
+
+def strip_code_fence(text: str) -> str:
+    """Drop a single wrapping ``` fence so the raw snapshot can be shown in <pre>."""
+    lines = text.splitlines()
+    if lines and lines[0].startswith("```"):
+        lines = lines[1:]
+    if lines and lines[-1].strip().startswith("```"):
+        lines = lines[:-1]
+    return "\n".join(lines).strip()
 
 
 def first_int(s: str) -> int | None:
@@ -66,7 +85,10 @@ def main() -> int:
         entry_id, date, author, score, delta, vs_zstd, commit, entry, note = c[:9]
         link_m = LINK_RE.search(entry)
         entry_rel = link_m.group(1) if link_m else ""
-        full = approach_text(entry_rel)
+        parsed = parse_entry(entry_rel)
+        sections = parsed["sections"]
+        meta = parsed["meta"]
+        approach = sections.get("approach", "")
         rows.append(
             {
                 "id": entry_id,
@@ -77,8 +99,14 @@ def main() -> int:
                 "deltaValue": first_int(delta) if "baseline" not in delta else None,
                 "vsZstd": vs_zstd,
                 "commit": commit.strip("`"),
+                "commitFull": meta.get("commit", ""),
+                "status": meta.get("status", ""),
                 "entryPath": entry_rel,
-                "note": full or note,
+                "note": approach or note,
+                "approach": approach or note,
+                "iterationNotes": sections.get("iteration notes", ""),
+                "algoChanges": strip_code_fence(sections.get("algorithm changes", "")),
+                "evalSnapshot": strip_code_fence(sections.get("eval snapshot", "")),
                 "isRecord": "record" in delta.lower(),
             }
         )
