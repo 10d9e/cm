@@ -195,7 +195,7 @@ function renderGrid(data) {
         <th class="c-id">#</th>
         <th class="c-author">Committer</th>
         <th class="c-score">SCORE</th>
-        <th class="c-delta">Δ vs record</th>
+        <th class="c-delta">Δ</th>
         <th class="c-zstd">vs zstd</th>
         <th class="c-note">Comment</th>
         <th class="c-open"></th>
