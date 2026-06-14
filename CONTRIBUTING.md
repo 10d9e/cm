@@ -9,62 +9,70 @@ Read [`AUTORESEARCH.md`](AUTORESEARCH.md) for the full rules before editing.
 ## Quick start
 
 1. **Fork** the repo on GitHub and clone your fork.
-2. Set your handle so submissions are attributed:
-   ```bash
-   git config github.user your-github-handle
-   ```
-3. Create a branch for your work:
+2. Create a branch for your work:
    ```bash
    git checkout -b improve/statemap
    ```
-4. Edit **only** `src/algorithm/` (see AUTORESEARCH.md).
-5. Evaluate:
+3. Edit **only** `src/algorithm/` (see AUTORESEARCH.md).
+4. Evaluate locally (optional, for iteration):
    ```bash
    bash scripts/evaluate.sh
    ```
-6. **Record your submission** (required for PRs that change the algorithm):
-   ```bash
-   bash scripts/record.sh \
-     --author @your-github-handle \
-     --note "Replaced plain counters with StateMap bit-history states because …" \
-     --attempts "Tried order-8 first (+500 bytes) → reverted."
-   ```
-7. Commit algorithm changes **and** the generated `history/entries/…` + `RESULTS.md` row.
-8. Open a pull request.
+5. Commit **only** your algorithm changes and open a pull request.
+6. Fill in the PR template — especially **`## Approach`** and
+   **`## Iteration notes`**. CI uses these when writing the history entry.
+7. Wait for **Verify PR** — it scores on GitHub, then **auto-merges** to `main`.
+8. **Scorekeeper** runs on merge and appends the verified ledger entry.
 
-## What “memory” means here
+## CI is the source of truth
 
-Git alone does not explain *why* a change helped. This repo keeps an append-only
-**submission ledger**:
+| What | Who updates it |
+|------|----------------|
+| `src/algorithm/` | You (via PR) |
+| `RESULTS.md`, `history/entries/` | **Scorekeeper CI only** (on merge to `main`) |
+| SCORE on the leaderboard | Computed by CI — never trust local claims |
 
-| Artifact | Purpose |
-|----------|---------|
-| [`history/entries/`](history/entries/) | Full story per submission: approach, failed tries, diff, eval snapshot |
-| [`RESULTS.md`](RESULTS.md) | Leaderboard with links into the ledger |
-| Your PR description | Human-readable summary for reviewers |
-| Git commits | Fine-grained code history inside `src/algorithm/` |
+**Do not** commit `RESULTS.md` or `history/entries/` in your PR. If you do, the
+**Verify PR** and **Scorekeeper** workflows will fail.
 
-Every improvement (and worthwhile non-improving attempt) should be recorded with
-`record.sh` so competitors can see how you got there.
+Local `bash scripts/record.sh` is a preview helper only; it cannot push ledger
+updates to `main`.
 
 ## Pull request checklist
 
-- [ ] `bash scripts/evaluate.sh` passes (guard + tests + valid SCORE)
-- [ ] `bash scripts/record.sh …` run; new file under `history/entries/` included
-- [ ] `RESULTS.md` updated by `record.sh`
-- [ ] PR describes your hypothesis and key tradeoffs
-- [ ] No changes outside `src/algorithm/`, `RESULTS.md`, and `history/entries/` (guard enforces this)
-- [ ] No corpus embedding, side channels, or nondeterminism (see AUTORESEARCH.md)
+- [ ] Only `src/algorithm/` changed
+- [ ] PR template filled in (`## Approach` required for history)
+- [ ] **Verify PR** GitHub Actions check passes
+- [ ] No corpus-specific tuning or side channels (see AUTORESEARCH.md)
+- [ ] Did **not** commit `RESULTS.md` or `history/entries/`
 
 ## Beating the record
 
-If your SCORE is **lower** than the current record in `RESULTS.md`, `record.sh`
-marks the entry as **record** and your PR can merge the algorithm change into
-`main`. If your SCORE is higher, still record it as an **attempt** — failed
-experiments are valuable memory — but revert algorithm changes before merging
-unless maintainers agree to keep them for other reasons.
+If CI reports a SCORE **lower** than the current record in `RESULTS.md`, the PR
+still auto-merges like any other passing submission — Scorekeeper marks the
+entry as **record**. Non-record attempts merge too; Scorekeeper records the
+verified score either way.
+
+## Branch protection (maintainers)
+
+On `main`, enable:
+
+- Require pull request before merging
+- Require status check **Verify PR / verify**
+- Restrict who can push directly to `main`
+- **Do not** require approving reviews (verification is the gate)
+
+Auto-merge uses the default **`GITHUB_TOKEN`** via a separate **Auto-merge**
+workflow (`workflow_run` after **Verify PR** succeeds). That pattern runs in the
+base-repo context, so fork PRs merge without a PAT.
+
+In **Settings → Actions → General → Workflow permissions**, choose **Read and
+write permissions** for the default `GITHUB_TOKEN`.
+
+Flow: **Verify PR** passes → **Auto-merge** squash-merges → **Scorekeeper**
+commits the ledger.
 
 ## Questions
 
 Open a GitHub issue for harness bugs or rule clarifications. Algorithm ideas
-belong in PRs and history entries.
+belong in PRs — the narrative goes in the PR description for CI to archive.

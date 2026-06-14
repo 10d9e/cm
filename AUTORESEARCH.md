@@ -65,8 +65,10 @@ Everything else, including:
 - `Cargo.toml`      (no new dependencies — std-only Rust)
 - `AUTORESEARCH.md`
 
-The boundary is enforced by `scripts/guard.sh`, which fails if any file outside
-`src/algorithm/`, `RESULTS.md`, or `history/entries/` differs from the committed baseline.
+The boundary is enforced by `scripts/guard.sh` (local) and `scripts/guard-pr.sh`
+(CI): only `src/algorithm/` may change in a submission. `RESULTS.md` and
+`history/entries/` are updated exclusively by the Scorekeeper GitHub Action on
+merge to `main`.
 
 ## Anti-cheat rules (these define "a real improvement")
 
@@ -99,16 +101,11 @@ rejected on review and may break on the hidden evaluation set.
    succeeds, all round-trip tests pass, and it prints a numeric `SCORE:`.
 3. If the new SCORE is lower than your best, keep the change; otherwise revert
    (`git checkout -- src/algorithm`).
-4. **Record the submission** so the repo remembers your approach:
-   ```
-   bash scripts/record.sh \
-     --author @your-github-handle \
-     --note "What you changed and why." \
-     --attempts "Optional: things you tried and reverted."
-   ```
-   This writes a detailed entry under `history/entries/` and appends a row to
-   `RESULTS.md`. Append-only — never edit old history entries.
-5. Commit `src/algorithm/`, the new history entry, and `RESULTS.md` together.
+4. Open a pull request with **only** `src/algorithm/` changes. Put your approach
+   in the PR description (`## Approach`, `## Iteration notes`) — CI copies that
+   into `history/entries/` on merge. **Do not** commit `RESULTS.md` or ledger files.
+5. Wait for the **Verify PR** GitHub Actions check (authoritative score). It
+   auto-merges passing PRs to `main`; Scorekeeper then writes the history entry.
 6. Occasionally run `cargo test` (debug build) — it additionally catches
    integer-overflow bugs that release mode silently wraps. Use `wrapping_*`
    ops anywhere values may overflow (hashes, the mixer, `c4`).

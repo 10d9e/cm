@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Boundary guard: fail if anything outside src/algorithm/, RESULTS.md, or
-# history/entries/ was changed relative to the committed baseline, or if the frozen contract
+# Local boundary guard: fail if anything outside src/algorithm/ was changed
+# relative to HEAD. Ledger files (RESULTS.md, history/entries/) are CI-only.
+# FROZEN — do not edit as part of autoresearch.
 # signatures were altered. FROZEN — do not edit as part of autoresearch.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -15,8 +16,6 @@ while IFS= read -r f; do
   [[ -z "$f" ]] && continue
   case "$f" in
     src/algorithm/*) ;;
-    RESULTS.md) ;;
-    history/entries/*) ;;
     *) violations+=("$f") ;;
   esac
 done < <( { git diff --name-only HEAD; git ls-files --others --exclude-standard; } | sort -u )
@@ -24,7 +23,7 @@ done < <( { git diff --name-only HEAD; git ls-files --others --exclude-standard;
 if (( ${#violations[@]} )); then
   echo "BOUNDARY VIOLATION — these frozen files were modified:"
   printf '  %s\n' "${violations[@]}"
-  echo "Only src/algorithm/, RESULTS.md, and history/entries/ may change."
+  echo "Only src/algorithm/ may change locally. CI updates RESULTS.md and history/entries/."
   exit 1
 fi
 

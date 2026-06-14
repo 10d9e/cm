@@ -17,7 +17,7 @@ src/main.rs      frozen   — CLI
 tests/           frozen   — losslessness gate (fuzzed, not corpus-tied)
 corpus/          frozen   — fixed benchmark + baselines.tsv
 history/         ledger   — append-only submission history (entries/ editable)
-scripts/         frozen   — guard.sh, evaluate.sh, record.sh
+scripts/         frozen   — guard.sh, evaluate.sh, record.sh, CI scorekeeper
 ```
 
 ## Usage
@@ -29,11 +29,14 @@ cargo build --release
 ./target/release/cm eval corpus           # score against the corpus
 ```
 
-Or grade a candidate end-to-end (guard + tests + score):
+Or grade a candidate locally (guard + tests + score; ledger updates are CI-only):
 
 ```
 bash scripts/evaluate.sh
 ```
+
+Pull requests are verified on GitHub (**Verify PR**), auto-merged on pass, then
+**Scorekeeper** appends the verified score to `RESULTS.md` and `history/entries/`.
 
 ## Design (current)
 
@@ -45,14 +48,8 @@ decompression is symmetric and slow by design.
 
 ## Improving it
 
-Edit only `src/algorithm/`, run `bash scripts/evaluate.sh`, keep changes that
-lower the SCORE. Record every submission so the repo remembers how you got there:
-
-```bash
-bash scripts/record.sh --author @you --note "What you changed and why."
-```
-
-See [`CONTRIBUTING.md`](CONTRIBUTING.md) and [`history/README.md`](history/README.md).
-The biggest known lever is replacing the plain counters with
+Edit only `src/algorithm/`, run `bash scripts/evaluate.sh` locally to iterate, open
+a PR, and let CI record verified scores. See [`CONTRIBUTING.md`](CONTRIBUTING.md)
+and [`history/README.md`](history/README.md). The biggest known lever is replacing the plain counters with
 bit-history states + a StateMap (helps the repetitive-data cases). Details and
 constraints are in `AUTORESEARCH.md`.

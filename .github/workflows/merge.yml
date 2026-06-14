@@ -1,0 +1,58 @@
+# Merges verified PRs using the default GITHUB_TOKEN.
+#
+# Why a separate workflow_run instead of merging inside verify.yml:
+# pull_request workflows from forks get a read-only GITHUB_TOKEN. workflow_run
+# fires in the base-repo context after Verify PR succeeds, where the default
+# token has write access — no PAT required.
+name: Auto-merge
+
+on:
+  workflow_run:
+    workflows: [Verify PR]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: read
+
+jobs:
+  merge:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Merge verified PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          VERIFIED_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          pr="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}/pull_requests" \
+            --jq '.[0].number // empty')"
+          if [[ -z "$pr" ]]; then
+            echo "No pull request linked to workflow run ${RUN_ID}; nothing to merge."
+            exit 0
+          fi
+
+          read -r state draft head_sha <<< "$(gh pr view "$pr" \
+            --json state,isDraft,headRefOid \
+            --jq '[.state, (.isDraft|tostring), .headRefOid] | @tsv')"
+          if [[ "$state" != "OPEN" ]]; then
+            echo "PR #${pr} is ${state}; skip merge."
+            exit 0
+          fi
+          if [[ "$draft" == "true" ]]; then
+            echo "PR #${pr} is a draft; skip merge."
+            exit 0
+          fi
+          if [[ "$head_sha" != "$VERIFIED_SHA" ]]; then
+            echo "PR #${pr} head ${head_sha} != verified ${VERIFIED_SHA}; skip merge."
+            exit 0
+          fi
+
+          echo "Merging PR #${pr} (verified at ${VERIFIED_SHA})"
+          gh pr merge "$pr" --squash --delete-branch

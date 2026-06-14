@@ -1,0 +1,32 @@
+name: Scorekeeper
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: read
+
+concurrency:
+  group: scorekeeper-main
+  cancel-in-progress: false
+
+jobs:
+  scorekeeper:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Record verified submission
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_SHA: ${{ github.sha }}
+          GITHUB_ACTOR: ${{ github.actor }}
+          GITHUB_EVENT_HEAD_COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
+        run: bash scripts/ci-scorekeeper.sh

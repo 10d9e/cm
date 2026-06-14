@@ -3,43 +3,39 @@
 This directory is the repo's **memory**: a permanent, append-only record of how
 each competitor arrived at their compressor changes and what score they achieved.
 
+**Only CI may append entries.** The Scorekeeper GitHub Action runs on every push
+to `main` that changes `src/algorithm/`, re-evaluates on GitHub Actions, and
+commits new files here plus a row in `RESULTS.md`. Users cannot forge scores by
+editing these files locally.
+
 ## Layout
 
 ```
 history/
   README.md          this file
-  entries/           one markdown file per recorded submission (never edit old entries)
-  TEMPLATE.md        copy/paste guide for what a good entry looks like
+  entries/           one markdown file per CI-recorded submission
+  TEMPLATE.md        reference format (not used directly by CI)
 ```
 
 Each entry captures:
 
-- **Who** submitted (GitHub handle, git author, commit)
-- **What** changed (`git diff` summary of `src/algorithm/`)
-- **Score** (total compressed bytes) and delta vs the previous record
-- **Approach** — the narrative: hypothesis, what you tried, what you kept or reverted
-- **Eval snapshot** — per-file breakdown at submission time
+- **Who** submitted (GitHub author, commit)
+- **What** changed (`git diff` summary of `src/algorithm/` vs parent commit)
+- **Score** (CI-computed total compressed bytes) and delta vs the previous record
+- **Approach** — copied from the merged PR's `## Approach` section
+- **Eval snapshot** — full per-file output from the authoritative CI run
 
-## Recording a submission
+## For competitors
 
-After a passing run of `bash scripts/evaluate.sh`:
+1. Edit only `src/algorithm/`.
+2. Open a PR with a good **`## Approach`** (and optional **`## Iteration notes`**).
+4. Pass the **Verify PR** check — it auto-merges to `main`.
+5. **Scorekeeper** writes the entry automatically.
 
-```bash
-bash scripts/record.sh \
-  --author @your-github-handle \
-  --note "One paragraph on what you changed and why." \
-  --attempts "Optional: failed tries you reverted along the way."
-```
+Do **not** commit files under `history/entries/` in your PR.
 
-This appends a row to `RESULTS.md` (leaderboard) and writes a new file under
-`history/entries/`. Entries are numbered sequentially (`0001`, `0002`, …).
+## For maintainers
 
-## Rules
+Entries are append-only. Never rewrite or delete past entries.
 
-- **Append only.** Do not rewrite or delete past entries; they are the audit trail.
-- **Valid candidates only.** Run `evaluate.sh` first — lossless round-trip must pass.
-- **Explain the journey.** A score without notes is not useful to the next researcher.
-- Entries with status `record` beat the previous best; `attempt` is a valid but
-  non-improving run worth documenting anyway.
-
-See [`CONTRIBUTING.md`](../CONTRIBUTING.md) for the full competition workflow.
+See [`CONTRIBUTING.md`](../CONTRIBUTING.md) and [`.github/workflows/scorekeeper.yml`](../.github/workflows/scorekeeper.yml).

@@ -9,8 +9,4 @@ Leaderboard of recorded submissions. Full narratives live in
 
 **Current record: 642822** (@10d9e, entry 0001)
 
-Record a new submission after `bash scripts/evaluate.sh`:
-
-```bash
-bash scripts/record.sh --author @you --note "What you changed and why."
-```
+Ledger updates are **CI-only** — see [`.github/workflows/scorekeeper.yml`](.github/workflows/scorekeeper.yml).

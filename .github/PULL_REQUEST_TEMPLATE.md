@@ -1,22 +1,21 @@
 ## Summary
 
-<!-- One paragraph: what you changed and the new SCORE (or attempt delta). -->
+<!-- One paragraph: what you changed and why. -->
 
 ## Approach
 
-<!-- Why did you expect this to help? What models/constants/mixer changes did you make? -->
+<!-- REQUIRED for history: why you expected this to help, what you changed in model/mixer/coder. CI copies this into history/entries/ on merge. -->
 
 ## Iteration notes
 
-<!-- Optional but valuable: what you tried and reverted along the way. -->
+<!-- Optional: what you tried and reverted along the way. CI copies this too. -->
 
 ## Checklist
 
-- [ ] `bash scripts/evaluate.sh` passes
-- [ ] `bash scripts/record.sh --author @… --note "…"` run; `history/entries/` + `RESULTS.md` committed
-- [ ] Only `src/algorithm/`, `RESULTS.md`, and `history/entries/` changed (guard clean)
+- [ ] Only `src/algorithm/` changed — **no** `RESULTS.md` or `history/entries/`
+- [ ] **Verify PR** check passes → auto-merges to `main` (CI score is authoritative)
 - [ ] No corpus-specific tuning or side channels
 
-## SCORE
+## Local score (informational only)
 
-<!-- Paste the SCORE line from evaluate.sh, e.g. SCORE: 640000 (Δ -2822 vs record) -->
+<!-- Optional: paste local evaluate output for reviewers. CI score is what counts. -->

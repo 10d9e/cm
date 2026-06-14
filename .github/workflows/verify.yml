@@ -1,0 +1,76 @@
+name: Verify PR
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: PR boundary guard
+        run: bash scripts/guard-pr.sh
+
+      - name: Correctness gate + score
+        run: bash scripts/evaluate.sh --no-guard
+
+      - name: Summarize score
+        run: |
+          ./target/release/cm eval corpus 2>&1 | tee /tmp/eval.out
+          score="$(grep '^SCORE:' /tmp/eval.out || true)"
+          {
+            echo "## Verification passed"
+            echo
+            echo '```'
+            cat /tmp/eval.out
+            echo '```'
+            echo
+            echo "**${score}**"
+            echo
+            echo "Do not commit \`RESULTS.md\` or \`history/entries/\`. Scorekeeper records the ledger after merge."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Comment score on PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          score="$(grep '^SCORE:' /tmp/eval.out || echo 'SCORE: unknown')"
+          prev="$(awk -F'|' '
+            NR>2 {
+              gsub(/ /,"",$4)
+              if ($4 ~ /^[0-9]+$/) {
+                if (best=="" || $4+0 < best+0) best=$4
+              }
+            }
+            END { print best }
+          ' RESULTS.md)"
+          delta=""
+          if [[ -n "$prev" && "$score" =~ SCORE:\ ([0-9]+) ]]; then
+            cur="${BASH_REMATCH[1]}"
+            d=$((cur - prev))
+            if (( d < 0 )); then delta=" (**new record**, Δ ${d})"
+            elif (( d == 0 )); then delta=" (tie)"
+            else delta=" (Δ +${d} vs record ${prev})"
+            fi
+          fi
+          {
+            echo "## CI verification passed ✅"
+            echo
+            echo "\`${score}\`${delta}"
+            echo
+            echo "This score was computed on GitHub Actions — local claims are not trusted."
+            echo
+            echo "Auto-merge will run via **Auto-merge** workflow (default \`GITHUB_TOKEN\`)."
+            echo "**Scorekeeper** will append the verified entry to \`RESULTS.md\` and"
+            echo "\`history/entries/\` from your PR description (\`## Approach\`,"
+            echo "\`## Iteration notes\`)."
+          } | gh pr comment "${{ github.event.pull_request.number }}" --body-file -
