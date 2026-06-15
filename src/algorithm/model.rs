@@ -106,7 +106,7 @@ pub struct Cm {
     cp: Vec<Vec<u16>>, // [NCTX][TSIZE] probabilities 0..4095
     cn: Vec<Vec<u8>>,  // [NCTX][TSIZE] observation counts
     st: Vec<Vec<u8>>,  // [NCTX][TSIZE] bit-history state per context slot
-    sm: Vec<Vec<u32>>, // [NCTX][256] StateMap: state -> (prob22<<10 | count)
+    sm: Vec<Vec<u32>>, // [NCTX][256*8] StateMap: (state | bitpos<<8) -> (prob22<<10 | count)
     sm_idx: [usize; NCTX],
     rate_tab: [i32; 256],
     ctxhash: [u32; NCTX],
@@ -174,7 +174,7 @@ impl Cm {
         let cp = (0..NCTX).map(|_| vec![2048u16; TSIZE]).collect();
         let cn = (0..NCTX).map(|_| vec![0u8; TSIZE]).collect();
         let st = (0..NCTX).map(|_| vec![0u8; TSIZE]).collect();
-        let sm = (0..NCTX).map(|_| vec![1u32 << 31; 256]).collect();
+        let sm = (0..NCTX).map(|_| vec![1u32 << 31; 256 * 8]).collect();
         let w = vec![(1 << 16) / NINPUT as i32; MIXCTX * NINPUT];
 
         let mut bufsize: u32 = 1;
@@ -378,9 +378,9 @@ impl Cm {
             let ix = (self.ctxhash[i].wrapping_mul(769).wrapping_add(self.c0 as u32) & TMASK) as usize;
             self.idx[i] = ix;
             self.mix_in[i] = self.stretch[self.cp[i][ix] as usize];
-            let s = self.st[i][ix] as usize;
-            self.sm_idx[i] = s;
-            let smp = (self.sm[i][s] >> 20) as usize;
+            let mi = (self.st[i][ix] as usize) | ((self.bitcount as usize) << 8);
+            self.sm_idx[i] = mi;
+            let smp = (self.sm[i][mi] >> 20) as usize;
             self.mix_in[SM_BASE + i] = self.stretch[smp];
         }
         self.mm_used = false;
