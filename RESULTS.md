@@ -41,7 +41,8 @@ Leaderboard of recorded submissions. Full narratives live in
 | 0034 | 2026-06-15 | @10d9e | 579101 | -70 (new record) | +16.28% | `562dd16` | [0034](history/entries/0034--10d9e.md) | Adds a run-length context: the last byte combined with the length of its current… |
 | 0035 | 2026-06-15 | @10d9e | 578791 | -310 (new record) | +16.32% | `6236ca9` | [0035](history/entries/0035--10d9e.md) | Adds a sixth match model anchored on just the last 4 bytes. The existing match m… |
 | 0036 | 2026-06-15 | @10d9e | 578673 | -118 (new record) | +16.34% | `ec9792e` | [0036](history/entries/0036--10d9e.md) | Retunes the short match model added in the previous entry from an order-4 anchor… |
+| 0037 | 2026-06-15 | @10d9e | 578672 | -1 (new record) | +16.34% | `aa300ac` | [0037](history/entries/0037--10d9e.md) | Memory optimization. The six match-model hash tables were sized at 2^23..2^26 en… |
 
-**Current record: 578673** (@10d9e, entry 0036)
+**Current record: 578672** (@10d9e, entry 0037)
 
 Ledger updates are **CI-only** — see [`.github/workflows/scorekeeper.yml`](.github/workflows/scorekeeper.yml).
