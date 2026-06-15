@@ -801,18 +801,18 @@ impl Cm {
 
         let a1ctx = ((self.c1 | (if self.matchlen > 0 { 256 } else { 0 })) as usize) & 1023;
         let a1 = self.apm1.apply(&self.stretch, a1ctx, p);
-        p = (p + 3 * a1) >> 2;
+        p = (p + a1) >> 1;
         if p < 1 { p = 1; }
         if p > 4094 { p = 4094; }
         let a2 = self.apm2.apply(&self.stretch, (self.c4 & 0x3fff) as usize, p);
-        p = (p + 3 * a2) >> 2;
+        p = (p + a2) >> 1;
         if p < 1 { p = 1; }
         if p > 4094 { p = 4094; }
         let a3ctx = (self.c0 as usize)
             | (if self.matchlen > 0 { 256 } else { 0 })
             | (if self.matchlen3 > 0 { 512 } else { 0 });
         let a3 = self.apm3.apply(&self.stretch, a3ctx, p);
-        p = (p + 3 * a3) >> 2;
+        p = (p + a3) >> 1;
         if p < 1 { p = 1; }
         if p > 4094 { p = 4094; }
         // Match-length SSE: calibrate by how long the current order-6 match runs.
