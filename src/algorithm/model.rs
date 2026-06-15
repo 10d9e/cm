@@ -8,7 +8,7 @@
 
 use super::tables::{build, squash_d};
 
-const NCTX: usize = 81; // orders + word/n-gram + strided-sparse + gap bigrams + 2D (rich) + record + indirect + text shape/layout
+const NCTX: usize = 82; // orders + word/n-gram + strided-sparse + gap bigrams + 2D + record + indirect(+word) + text shape/layout
 // Mixer input layout:
 //   [0 .. NCTX)            direct adaptive counters
 //   [SM_BASE .. SM_BASE+NCTX) bit-history StateMap predictions (one per context)
@@ -245,6 +245,7 @@ pub struct Cm {
     follow2: Vec<u32>, // [65536] packed recent bytes that followed each order-2 ctx
     follow3: Vec<u32>, // [FSIZE] hashed: bytes that followed each order-3 ctx
     follow4: Vec<u32>, // [FSIZE] hashed: bytes that followed each order-4 ctx
+    followw: Vec<u32>, // [65536] hashed: bytes that followed each word prefix
 }
 
 impl Cm {
@@ -374,6 +375,7 @@ impl Cm {
             follow2: vec![0u32; 65536],
             follow3: vec![0u32; FSIZE],
             follow4: vec![0u32; FSIZE],
+            followw: vec![0u32; 65536],
         }
     }
 
@@ -881,6 +883,13 @@ impl Cm {
         self.ctxhash[77] = hashk(0x6B00, (c4 & 0x00ff_ffff) ^ self.follow3[j3].wrapping_mul(0xc2b2_ae35));
         let j4 = (c4.wrapping_mul(0x85eb_ca6b) >> (32 - FBITS)) as usize;
         self.ctxhash[78] = hashk(0x6C00, c4 ^ self.follow4[j4].wrapping_mul(0x27d4_eb2f));
+        // Word-indirect: current word prefix + the bytes that have followed it.
+        self.ctxhash[81] = if self.wordhash != 0 {
+            let wk = (self.wordhash.wrapping_mul(0x9e37_79b1) >> 16) as usize;
+            hashk(0x7000, self.wordhash ^ self.followw[wk].wrapping_mul(0xc2b2_ae35))
+        } else {
+            0
+        };
     }
 
     #[inline]
@@ -1216,6 +1225,9 @@ impl Cm {
                 self.rlen = d;
                 self.rcount = 1;
             }
+            // Word-indirect: record that `byte` followed the current word prefix.
+            let wk = (self.wordhash.wrapping_mul(0x9e37_79b1) >> 16) as usize;
+            self.followw[wk] = (self.followw[wk] << 8) | byte as u32;
             if (byte >= b'a' && byte <= b'z') || (byte >= b'A' && byte <= b'Z')
                 || (byte >= b'0' && byte <= b'9')
             {
