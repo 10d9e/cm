@@ -175,7 +175,9 @@ pub struct Cm {
     mix_in: [i32; NINPUT],
     l1: Vec<Mixer>,   // layer-1 specialist mixers (different selection contexts)
     l2: Mixer,        // layer-2 combiner over the layer-1 logits (last-byte ctx)
-    l2b: Mixer,       // second layer-2 combiner (bit-position ctx), averaged with l2
+    l2b: Mixer,       // second layer-2 combiner (bit-position ctx)
+    l2c: Mixer,       // third layer-2 combiner (match-state ctx)
+    l2d: Mixer,       // fourth layer-2 combiner (2nd-to-last-byte ctx)
     l2_in: [i32; NL1],
     buf: Vec<u8>,
     bufmask: u32,
@@ -251,6 +253,8 @@ impl Cm {
         ];
         let l2 = Mixer::new(NL1, 256, 12);
         let l2b = Mixer::new(NL1, 256, 12);
+        let l2c = Mixer::new(NL1, 256, 12);
+        let l2d = Mixer::new(NL1, 256, 12);
 
         let mut bufsize: u32 = 1;
         while (bufsize as usize) < expected_len + 16 && bufsize < (1 << 27) {
@@ -278,6 +282,8 @@ impl Cm {
             l1,
             l2,
             l2b,
+            l2c,
+            l2d,
             l2_in: [0; NL1],
             buf: vec![0u8; bufsize as usize],
             bufmask: bufsize - 1,
@@ -802,7 +808,12 @@ impl Cm {
         // byte, one on the within-byte bit position — averaged in the logit domain.
         let d2a = self.l2.mix(&self.l2_in, &self.squash, self.c1 as usize);
         let d2b = self.l2b.mix(&self.l2_in, &self.squash, self.c0 as usize);
-        let mut p = squash_d(&self.squash, (d2a + d2b) >> 1);
+        let l2cctx = ((self.matchlen.min(15) as usize) << 2)
+            | (if self.matchlen3 > 0 { 2 } else { 0 })
+            | (if self.matchlen4 > 0 { 1 } else { 0 });
+        let d2c = self.l2c.mix(&self.l2_in, &self.squash, l2cctx);
+        let d2d = self.l2d.mix(&self.l2_in, &self.squash, ((self.c4 >> 8) & 0xff) as usize);
+        let mut p = squash_d(&self.squash, (d2a + d2b + d2c + d2d) >> 2);
         if p < 1 { p = 1; }
         if p > 4094 { p = 4094; }
 
@@ -867,6 +878,8 @@ impl Cm {
         self.l1[4].update(bit, &self.mix_in);
         self.l2.update(bit, &self.l2_in);
         self.l2b.update(bit, &self.l2_in);
+        self.l2c.update(bit, &self.l2_in);
+        self.l2d.update(bit, &self.l2_in);
         for i in 0..NCTX {
             let ix = self.idx[i];
             let n = self.cn[i][ix] as i32;
