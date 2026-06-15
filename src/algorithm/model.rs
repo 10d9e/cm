@@ -216,6 +216,7 @@ pub struct Cm {
     mm_idx5: usize,
     apm1: Apm,
     apm2: Apm,
+    apm3: Apm,
     c0: i32,
     bitcount: i32,
     c4: u32,
@@ -256,6 +257,7 @@ impl Cm {
 
         let apm1 = Apm::new(1024, &squash);
         let apm2 = Apm::new(16384, &squash);
+        let apm3 = Apm::new(1024, &squash);
 
         Cm {
             stretch,
@@ -312,6 +314,7 @@ impl Cm {
             mm_idx5: 0,
             apm1,
             apm2,
+            apm3,
             c0: 1,
             bitcount: 0,
             c4: 0,
@@ -657,6 +660,13 @@ impl Cm {
         p = (p + 3 * a2) >> 2;
         if p < 1 { p = 1; }
         if p > 4094 { p = 4094; }
+        let a3ctx = (self.c0 as usize)
+            | (if self.matchlen > 0 { 256 } else { 0 })
+            | (if self.matchlen3 > 0 { 512 } else { 0 });
+        let a3 = self.apm3.apply(&self.stretch, a3ctx, p);
+        p = (p + 3 * a3) >> 2;
+        if p < 1 { p = 1; }
+        if p > 4094 { p = 4094; }
         p
     }
 
@@ -665,6 +675,7 @@ impl Cm {
         let t = if bit != 0 { 4095 } else { 0 };
         self.apm1.update(bit);
         self.apm2.update(bit);
+        self.apm3.update(bit);
         if self.mm_used {
             let v = self.mm_sm[self.mm_idx] as i32;
             self.mm_sm[self.mm_idx] = (v + (((if bit != 0 { 4095 } else { 0 }) - v) >> 6)) as u16;
