@@ -247,15 +247,15 @@ impl Cm {
         let st = (0..NCTX).map(|_| vec![0u8; TSIZE]).collect();
         let sm = (0..NCTX).map(|_| vec![1u32 << 31; 256 * 8]).collect();
         let l1 = vec![
-            Mixer::new(NINPUT, MIXCTX, 14),
-            Mixer::new(NINPUT, 256, 14),
-            Mixer::new(NINPUT, 256, 14),
-            Mixer::new(NINPUT, MIX3CTX, 14),
-            Mixer::new(NINPUT, MIX4CTX, 14),
-            Mixer::new(NINPUT, 64, 14),
-            Mixer::new(NINPUT, 4096, 14),
-            Mixer::new(NINPUT, 8192, 14),
-            Mixer::new(NINPUT, 8192, 14),
+            Mixer::new(NINPUT, MIXCTX, 12),
+            Mixer::new(NINPUT, 256, 12),
+            Mixer::new(NINPUT, 256, 12),
+            Mixer::new(NINPUT, MIX3CTX, 12),
+            Mixer::new(NINPUT, MIX4CTX, 12),
+            Mixer::new(NINPUT, 64, 12),
+            Mixer::new(NINPUT, 4096, 12),
+            Mixer::new(NINPUT, 8192, 12),
+            Mixer::new(NINPUT, 8192, 12),
         ];
         let l2 = Mixer::new(NL1, 256, 12);
         let l2b = Mixer::new(NL1, 256, 12);
