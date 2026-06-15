@@ -26,7 +26,8 @@ Leaderboard of recorded submissions. Full narratives live in
 | 0019 | 2026-06-15 | @10d9e | 584723 | -259 (new record) | +15.47% | `5611fb9` | [0019](history/entries/0019--10d9e.md) | Expands the layer-2 ensemble from two combiners to four, averaged in the logit d… |
 | 0020 | 2026-06-15 | @10d9e | 584276 | -447 (new record) | +15.53% | `bf5b353` | [0020](history/entries/0020--10d9e.md) | Adds eleven 4-sample strided context models — each hashes bytes at pos-k, pos-… |
 | 0021 | 2026-06-15 | @10d9e | 583905 | -371 (new record) | +15.58% | `56ef71a` | [0021](history/entries/0021--10d9e.md) | Adds word-level n-gram/skip-gram context models, targeting natural-language text… |
+| 0022 | 2026-06-15 | @10d9e | 583868 | -37 (new record) | +15.59% | `91f5665` | [0022](history/entries/0022--10d9e.md) | Extends the layer-2 ensemble from four combiners to five, averaged in the logit … |
 
-**Current record: 583905** (@10d9e, entry 0021)
+**Current record: 583868** (@10d9e, entry 0022)
 
 Ledger updates are **CI-only** — see [`.github/workflows/scorekeeper.yml`](.github/workflows/scorekeeper.yml).
