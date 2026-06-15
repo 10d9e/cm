@@ -8,7 +8,7 @@
 
 use super::tables::{build, squash_d};
 
-const NCTX: usize = 55; // orders + word + strided-sparse bank + gap bigrams + text shape/layout
+const NCTX: usize = 66; // orders + word + strided-sparse (3- and 4-sample) + gap bigrams + text shape/layout
 // Mixer input layout:
 //   [0 .. NCTX)            direct adaptive counters
 //   [SM_BASE .. SM_BASE+NCTX) bit-history StateMap predictions (one per context)
@@ -697,6 +697,25 @@ impl Cm {
         ] {
             self.ctxhash[slot] = if self.pos >= k {
                 hashk(tag, (c4 & 0xff) | ((self.b(self.pos - k) as u32) << 8))
+            } else {
+                hashk(tag, c4)
+            };
+        }
+        // 4-sample strided contexts: bytes at pos-k,2k,3k,4k for k=2..8
+        // (longer periodic / record context than the 3-sample strides).
+        for (slot, k, tag) in [
+            (55usize, 2u32, 0x4000u32), (56, 3, 0x4100), (57, 4, 0x4200),
+            (58, 5, 0x4300), (59, 6, 0x4400), (60, 7, 0x4500), (61, 8, 0x4600),
+            (62, 9, 0x4700), (63, 10, 0x4800), (64, 11, 0x4900), (65, 12, 0x4A00),
+        ] {
+            self.ctxhash[slot] = if self.pos >= k * 4 {
+                hashk(
+                    tag,
+                    (self.b(self.pos - k) as u32)
+                        ^ (self.b(self.pos - k * 2) as u32).wrapping_mul(0x85eb_ca6b)
+                        ^ (self.b(self.pos - k * 3) as u32).wrapping_mul(0xc2b2_ae35)
+                        ^ (self.b(self.pos - k * 4) as u32).wrapping_mul(0x27d4_eb2f),
+                )
             } else {
                 hashk(tag, c4)
             };
