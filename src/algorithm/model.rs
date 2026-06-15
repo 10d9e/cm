@@ -20,7 +20,7 @@ const TBITS: u32 = 23;
 const TSIZE: usize = 1 << TBITS;
 const TMASK: u32 = (TSIZE as u32) - 1;
 const MIXCTX: usize = 16384;
-const NL1: usize = 7; // number of layer-1 specialist mixers
+const NL1: usize = 8; // number of layer-1 specialist mixers
 const MIX3CTX: usize = 8192; // order-2 specialist rows
 const MIX4CTX: usize = 8192; // order-3 specialist rows
 const MMBITS: u32 = 25;
@@ -254,6 +254,7 @@ impl Cm {
             Mixer::new(NINPUT, MIX4CTX, 14),
             Mixer::new(NINPUT, 64, 14),
             Mixer::new(NINPUT, 4096, 14),
+            Mixer::new(NINPUT, 8192, 14),
         ];
         let l2 = Mixer::new(NL1, 256, 12);
         let l2b = Mixer::new(NL1, 256, 12);
@@ -872,6 +873,8 @@ impl Cm {
         self.l2_in[5] = self.l1[5].mix(&self.mix_in, &self.squash, ctx5);
         let ctx6 = (((self.col & 63) << 6) | (self.c1 as u32 & 63)) as usize;
         self.l2_in[6] = self.l1[6].mix(&self.mix_in, &self.squash, ctx6);
+        let ctx7 = (self.c4.wrapping_mul(0x9e37_79b1) >> 19) as usize;
+        self.l2_in[7] = self.l1[7].mix(&self.mix_in, &self.squash, ctx7);
         // Two layer-2 combiners over the layer-1 logits — one keyed on the last
         // byte, one on the within-byte bit position — averaged in the logit domain.
         let d2a = self.l2.mix(&self.l2_in, &self.squash, self.c1 as usize);
@@ -952,6 +955,7 @@ impl Cm {
         self.l1[4].update(bit, &self.mix_in);
         self.l1[5].update(bit, &self.mix_in);
         self.l1[6].update(bit, &self.mix_in);
+        self.l1[7].update(bit, &self.mix_in);
         self.l2.update(bit, &self.l2_in);
         self.l2b.update(bit, &self.l2_in);
         self.l2c.update(bit, &self.l2_in);
