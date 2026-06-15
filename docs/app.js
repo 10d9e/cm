@@ -230,12 +230,13 @@ function openDialog(e, repo) {
         </div>
         <div class="d-sub">
           <a href="${profile}" target="_blank" rel="noopener">${escapeHtml(e.author)}</a>
-          · ${escapeHtml(e.date)}
+          · ${escapeHtml(e.date)}${e.model ? ` · ${escapeHtml(e.model)}` : ""}
         </div>
       </div>
     </header>
 
     <div class="d-metrics">
+      ${e.model ? `<div class="d-metric"><span class="m-label">Model</span><span class="m-value">${escapeHtml(e.model)}</span></div>` : ""}
       <div class="d-metric"><span class="m-label">SCORE</span><span class="m-value">${fmt(e.score)}</span></div>
       <div class="d-metric"><span class="m-label">Δ vs record</span><span class="m-value"><span class="badge ${deltaClass}">${escapeHtml(e.delta)}</span></span></div>
       <div class="d-metric"><span class="m-label">vs zstd −22</span><span class="m-value">${escapeHtml(e.vsZstd)}</span></div>
