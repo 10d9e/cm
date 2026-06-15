@@ -51,8 +51,13 @@ fn hashk(h: u32, x: u32) -> u32 {
 /// aggressive recency bias that lets the StateMap track nonstationary data well.
 #[inline]
 fn next_state(s: u8, bit: i32) -> u8 {
-    let mut n0 = (s >> 4) as i32;
-    let mut n1 = (s & 15) as i32;
+    // Asymmetric encoding: with the reset-recency rule the minority count is
+    // always small, so pack (sign, big=majority 0..31, small=minority 0..3) to
+    // distinguish run lengths up to 31 instead of the nibble's 15.
+    let sign = (s >> 7) & 1;
+    let big = ((s >> 2) & 31) as i32;
+    let small = (s & 3) as i32;
+    let (mut n0, mut n1) = if sign == 0 { (big, small) } else { (small, big) };
     if bit != 0 {
         n1 += 1;
         if n0 > 3 { n0 = 3; }
@@ -60,9 +65,10 @@ fn next_state(s: u8, bit: i32) -> u8 {
         n0 += 1;
         if n1 > 3 { n1 = 3; }
     }
-    if n0 > 15 { n0 = 15; }
-    if n1 > 15 { n1 = 15; }
-    ((n0 << 4) | n1) as u8
+    let (ns, nb, nsm) = if n1 > n0 { (1, n1, n0) } else { (0, n0, n1) };
+    let nb = if nb > 31 { 31 } else { nb };
+    let nsm = if nsm > 3 { 3 } else { nsm };
+    ((ns << 7) | (nb << 2) | nsm) as u8
 }
 
 struct Apm {
