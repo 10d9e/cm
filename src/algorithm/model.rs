@@ -20,6 +20,9 @@ const TBITS: u32 = 22;
 const TSIZE: usize = 1 << TBITS;
 const TMASK: u32 = (TSIZE as u32) - 1;
 const MIXCTX: usize = 16384;
+const NL1: usize = 5; // number of layer-1 specialist mixers
+const MIX3CTX: usize = 8192; // order-2 specialist rows
+const MIX4CTX: usize = 8192; // order-3 specialist rows
 const MMBITS: u32 = 25;
 const MMSIZE: usize = 1 << MMBITS;
 const MMBITS2: u32 = 26;
@@ -100,6 +103,64 @@ impl Apm {
     }
 }
 
+/// A context-selected logistic mixer. Holds `nctx` weight rows of `n` inputs;
+/// each step selects one row by context, dot-products it with the stretched
+/// inputs to produce a logit, and trains that row online toward the observed
+/// bit. Used both as the layer-1 specialists and the layer-2 combiner.
+struct Mixer {
+    n: usize,
+    nctx: usize,
+    w: Vec<i32>,
+    ctx: usize,
+    pr: i32,
+    lr: i32,
+}
+
+impl Mixer {
+    fn new(n: usize, nctx: usize, lr: i32) -> Self {
+        Mixer {
+            n,
+            nctx,
+            w: vec![(1 << 16) / n as i32; n * nctx],
+            ctx: 0,
+            pr: 2048,
+            lr,
+        }
+    }
+
+    /// Mix `inputs` under the given context; returns the clamped logit (the
+    /// stretched prediction) and caches the squashed probability for `update`.
+    #[inline]
+    fn mix(&mut self, inputs: &[i32], squash: &[i32], ctx: usize) -> i32 {
+        let ctx = ctx & (self.nctx - 1);
+        self.ctx = ctx;
+        let base = ctx * self.n;
+        let mut dot: i64 = 0;
+        for i in 0..self.n {
+            dot += self.w[base + i] as i64 * inputs[i] as i64;
+        }
+        let mut d = (dot >> 16) as i32;
+        if d > 2047 { d = 2047; }
+        if d < -2047 { d = -2047; }
+        let mut p = squash_d(squash, d);
+        if p < 1 { p = 1; }
+        if p > 4094 { p = 4094; }
+        self.pr = p;
+        d
+    }
+
+    /// Train the selected row toward `bit` using this mixer's own prediction.
+    #[inline]
+    fn update(&mut self, bit: i32, inputs: &[i32]) {
+        let err = (bit << 12) - self.pr;
+        let base = self.ctx * self.n;
+        for i in 0..self.n {
+            let delta = (inputs[i] * err * self.lr) >> 16;
+            self.w[base + i] = self.w[base + i].wrapping_add(delta);
+        }
+    }
+}
+
 pub struct Cm {
     stretch: Vec<i32>,
     squash: Vec<i32>,
@@ -112,8 +173,9 @@ pub struct Cm {
     ctxhash: [u32; NCTX],
     idx: [usize; NCTX],
     mix_in: [i32; NINPUT],
-    mixsel: usize,
-    w: Vec<i32>, // [MIXCTX*NINPUT]
+    l1: Vec<Mixer>,   // layer-1 specialist mixers (different selection contexts)
+    l2: Mixer,        // layer-2 combiner over the layer-1 logits
+    l2_in: [i32; NL1],
     buf: Vec<u8>,
     bufmask: u32,
     pos: u32,
@@ -177,7 +239,14 @@ impl Cm {
         let cn = (0..NCTX).map(|_| vec![0u8; TSIZE]).collect();
         let st = (0..NCTX).map(|_| vec![0u8; TSIZE]).collect();
         let sm = (0..NCTX).map(|_| vec![1u32 << 31; 256 * 8]).collect();
-        let w = vec![(1 << 16) / NINPUT as i32; MIXCTX * NINPUT];
+        let l1 = vec![
+            Mixer::new(NINPUT, MIXCTX, 14),
+            Mixer::new(NINPUT, 256, 14),
+            Mixer::new(NINPUT, 256, 14),
+            Mixer::new(NINPUT, MIX3CTX, 14),
+            Mixer::new(NINPUT, MIX4CTX, 14),
+        ];
+        let l2 = Mixer::new(NL1, 256, 4);
 
         let mut bufsize: u32 = 1;
         while (bufsize as usize) < expected_len + 16 && bufsize < (1 << 27) {
@@ -200,8 +269,9 @@ impl Cm {
             ctxhash: [0; NCTX],
             idx: [0; NCTX],
             mix_in: [0; NINPUT],
-            mixsel: 0,
-            w,
+            l1,
+            l2,
+            l2_in: [0; NL1],
             buf: vec![0u8; bufsize as usize],
             bufmask: bufsize - 1,
             pos: 0,
@@ -554,25 +624,29 @@ impl Cm {
                 self.matchlen5 = 0;
             }
         }
-        self.mixsel = (((if self.matchlen4 > 0 { 1 } else { 0 }) << 13)
+        // Layer-1 specialist mixers, each selected by a different context:
+        //   m0 — the proven last-byte + match-activity context (full resolution)
+        //   m1 — the within-byte partial-byte context (order-0 bit position)
+        //   m2 — the second-to-last byte (an order-2-distance specialist)
+        let ctx0 = (((if self.matchlen4 > 0 { 1 } else { 0 }) << 13)
             | ((if self.matchlen3 > 72 { 1 } else { 0 }) << 12)
             | ((if self.matchlen3 > 52 { 1 } else { 0 }) << 11)
             | ((if self.matchlen3 > 0 { 1 } else { 0 }) << 10)
             | ((if self.matchlen2 > 0 { 1 } else { 0 }) << 9)
             | ((if self.matchlen > 0 { 1 } else { 0 }) << 8)
-            | self.c1) as usize
-            & (MIXCTX - 1);
-        let base = self.mixsel * NINPUT;
-        let mut dot: i64 = 0;
-        for i in 0..NINPUT {
-            dot += self.w[base + i] as i64 * self.mix_in[i] as i64;
-        }
-        let mut d = (dot >> 16) as i32;
-        if d > 2047 { d = 2047; }
-        if d < -2047 { d = -2047; }
-        let mut p = squash_d(&self.squash, d);
-        if p < 1 { p = 1; }
-        if p > 4094 { p = 4094; }
+            | self.c1) as usize;
+        let ctx1 = self.c0 as usize;
+        let ctx2 = ((self.c4 >> 8) & 0xff) as usize;
+        let ctx3 = (self.c4 & 0xffff) as usize;
+        let ctx4 = ((self.c4 & 0xffffff).wrapping_mul(0x9e37_79b1) >> 13) as usize;
+        self.l2_in[0] = self.l1[0].mix(&self.mix_in, &self.squash, ctx0);
+        self.l2_in[1] = self.l1[1].mix(&self.mix_in, &self.squash, ctx1);
+        self.l2_in[2] = self.l1[2].mix(&self.mix_in, &self.squash, ctx2);
+        self.l2_in[3] = self.l1[3].mix(&self.mix_in, &self.squash, ctx3);
+        self.l2_in[4] = self.l1[4].mix(&self.mix_in, &self.squash, ctx4);
+        // Layer-2 combiner over the layer-1 logits, keyed on the last byte.
+        self.l2.mix(&self.l2_in, &self.squash, self.c1 as usize);
+        let mut p = self.l2.pr;
 
         let a1ctx = ((self.c1 | (if self.matchlen > 0 { 256 } else { 0 })) as usize) & 1023;
         let a1 = self.apm1.apply(&self.stretch, a1ctx, p);
@@ -587,7 +661,7 @@ impl Cm {
     }
 
     #[inline]
-    pub fn update(&mut self, bit: i32, p: i32) {
+    pub fn update(&mut self, bit: i32, _p: i32) {
         let t = if bit != 0 { 4095 } else { 0 };
         self.apm1.update(bit);
         self.apm2.update(bit);
@@ -611,12 +685,12 @@ impl Cm {
             let v = self.mm_sm5[self.mm_idx5] as i32;
             self.mm_sm5[self.mm_idx5] = (v + (((if bit != 0 { 4095 } else { 0 }) - v) >> 5)) as u16;
         }
-        let err = (bit << 12) - p;
-        let base = self.mixsel * NINPUT;
-        for i in 0..NINPUT {
-            let delta = (self.mix_in[i] * err * 5) >> 16;
-            self.w[base + i] = self.w[base + i].wrapping_add(delta);
-        }
+        self.l1[0].update(bit, &self.mix_in);
+        self.l1[1].update(bit, &self.mix_in);
+        self.l1[2].update(bit, &self.mix_in);
+        self.l1[3].update(bit, &self.mix_in);
+        self.l1[4].update(bit, &self.mix_in);
+        self.l2.update(bit, &self.l2_in);
         for i in 0..NCTX {
             let ix = self.idx[i];
             let n = self.cn[i][ix] as i32;
