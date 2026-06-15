@@ -1414,10 +1414,10 @@ impl Cm {
                     self.matchlen5 = if l >= 14 { l } else { 0 };
                 }
             }
-            // order-4 (short) match model: anchored on just the last 4 bytes,
-            // catches short repeated tokens that the order-6+ models miss.
-            if self.pos >= 4 {
-                let h6 = (self.c4.wrapping_mul(2654435761)) >> (32 - MMBITS6);
+            // order-2 (short) match model: anchored on just the last 2 bytes,
+            // catches short repeats far earlier than the order-6+ models.
+            if self.pos >= 2 {
+                let h6 = ((self.c4 & 0x0000_ffff).wrapping_mul(2654435761)) >> (32 - MMBITS6);
                 let cand = self.mmtab6[h6 as usize];
                 self.mmtab6[h6 as usize] = self.pos;
                 if self.matchlen6 == 0 && cand > 0 && cand < self.pos {
@@ -1430,7 +1430,7 @@ impl Cm {
                     {
                         l += 1;
                     }
-                    self.matchlen6 = if l >= 4 { l } else { 0 };
+                    self.matchlen6 = if l >= 2 { l } else { 0 };
                 }
             }
             self.predicted_byte = if self.matchlen > 0 && self.matchptr < self.pos {
