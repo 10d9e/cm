@@ -8,7 +8,7 @@
 
 use super::tables::{build, squash_d};
 
-const NCTX: usize = 47; // orders 0..11/13/16 + word + 23 sparse + text shape/layout + order-5 + word n-grams
+const NCTX: usize = 55; // orders + word + strided-sparse bank + gap bigrams + text shape/layout
 // Mixer input layout:
 //   [0 .. NCTX)            direct adaptive counters
 //   [SM_BASE .. SM_BASE+NCTX) bit-history StateMap predictions (one per context)
@@ -674,6 +674,17 @@ impl Cm {
                         | ((self.b(self.pos - stride * 2) as u32) << 8)
                         | ((self.b(self.pos - stride * 3) as u32) << 16),
                 )
+            } else {
+                hashk(tag, c4)
+            };
+        }
+        // gap bigrams: last byte paired with one byte at distance k = 6..13.
+        for (slot, k, tag) in [
+            (47usize, 6u32, 0x3000u32), (48, 7, 0x3100), (49, 8, 0x3200), (50, 9, 0x3300),
+            (51, 10, 0x3400), (52, 11, 0x3500), (53, 12, 0x3600), (54, 13, 0x3700),
+        ] {
+            self.ctxhash[slot] = if self.pos >= k {
+                hashk(tag, (c4 & 0xff) | ((self.b(self.pos - k) as u32) << 8))
             } else {
                 hashk(tag, c4)
             };
