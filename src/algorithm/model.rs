@@ -8,7 +8,7 @@
 
 use super::tables::{build, squash_d};
 
-const NCTX: usize = 86; // orders + word/n-gram + strided-sparse + gap bigrams + 2D + record + indirect + run + nest + text shape/layout
+const NCTX: usize = 88; // orders + word/n-gram + sparse + 2D + record + indirect + run + nest + hi-nibble + text shape/layout
 // Mixer input layout:
 //   [0 .. NCTX)            direct adaptive counters
 //   [SM_BASE .. SM_BASE+NCTX) bit-history StateMap predictions (one per context)
@@ -950,6 +950,23 @@ impl Cm {
                 ^ ((self.nest_depth as u32 & 31) << 16)
                 ^ (c4 & 0xffff),
         );
+        // High-nibble (opcode-class) context: the top nibble of the last 5 bytes,
+        // ignoring low-bit operand noise — targets executable/binary structure.
+        let hn = (c4 & 0xf0f0_f0f0)
+            ^ if self.pos >= 5 { ((self.b(self.pos - 5) as u32) & 0xf0) << 24 } else { 0 };
+        self.ctxhash[86] = hashk(0x7700, hn);
+        // longer high-nibble context (last 8 bytes' top nibbles), order-8-coarse.
+        self.ctxhash[87] = if self.pos >= 8 {
+            hashk(
+                0x7800,
+                hn.wrapping_mul(0x9e37_79b1)
+                    ^ ((self.b(self.pos - 6) as u32 & 0xf0) << 4)
+                    ^ ((self.b(self.pos - 7) as u32 & 0xf0) << 12)
+                    ^ ((self.b(self.pos - 8) as u32 & 0xf0) << 20),
+            )
+        } else {
+            hashk(0x7800, hn)
+        };
     }
 
     #[inline]
