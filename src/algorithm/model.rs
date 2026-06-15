@@ -47,18 +47,18 @@ fn hashk(h: u32, x: u32) -> u32 {
 /// Nonstationary bit-history state transition. The state byte packs two bounded
 /// counts (n0 in the high nibble, n1 in the low nibble, each 0..15). On each
 /// observed bit the matching count is incremented and the opposite count is
-/// discounted toward 2, which emphasises recent statistics — the classic
-/// recency bias that lets the StateMap track nonstationary / repetitive data.
+/// reset to a small floor (3), which strongly emphasises recent statistics — an
+/// aggressive recency bias that lets the StateMap track nonstationary data well.
 #[inline]
 fn next_state(s: u8, bit: i32) -> u8 {
     let mut n0 = (s >> 4) as i32;
     let mut n1 = (s & 15) as i32;
     if bit != 0 {
         n1 += 1;
-        if n0 > 2 { n0 = 2 + ((n0 - 2) >> 1); }
+        if n0 > 3 { n0 = 3; }
     } else {
         n0 += 1;
-        if n1 > 2 { n1 = 2 + ((n1 - 2) >> 1); }
+        if n1 > 3 { n1 = 3; }
     }
     if n0 > 15 { n0 = 15; }
     if n1 > 15 { n1 = 15; }
