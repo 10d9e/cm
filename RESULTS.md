@@ -43,6 +43,7 @@ Leaderboard of recorded submissions. Full narratives live in
 | 0036 | 2026-06-15 | @10d9e | 578673 | -118 (new record) | +16.34% | `ec9792e` | [0036](history/entries/0036--10d9e.md) | Retunes the short match model added in the previous entry from an order-4 anchor… |
 | 0037 | 2026-06-15 | @10d9e | 578672 | -1 (new record) | +16.34% | `aa300ac` | [0037](history/entries/0037--10d9e.md) | Memory optimization. The six match-model hash tables were sized at 2^23..2^26 en… |
 | 0038 | 2026-06-15 | @10d9e | 578672 | 0 (tie) | +16.34% | `de442dd` | [0038](history/entries/0038--10d9e.md) | Memory optimization with provably identical output. The order-0 context model ha… |
+| 0039 | 2026-06-15 | @10d9e | 578672 | 0 (tie) | +16.34% | `c71ba05` | [0039](history/entries/0039--10d9e.md) | Memory optimization, provably identical output. The direct-counter probability t… |
 
 **Current record: 578672** (@10d9e, entry 0037)
 
