@@ -32,7 +32,7 @@ const MMBITS5: u32 = 24;
 const MMSIZE5: usize = 1 << MMBITS5;
 const APM_S: usize = 33;
 const CNT_LIMIT: i32 = 254;
-const RATE_FLOOR: i32 = 24;
+const RATE_FLOOR: i32 = 48;
 
 #[inline]
 fn hashk(h: u32, x: u32) -> u32 {
@@ -513,7 +513,7 @@ impl Cm {
         let err = (bit << 12) - p;
         let base = self.mixsel * NINPUT;
         for i in 0..NINPUT {
-            let delta = (self.mix_in[i] * err) >> 13;
+            let delta = (self.mix_in[i] * err * 3) >> 15;
             self.w[base + i] = self.w[base + i].wrapping_add(delta);
         }
         for i in 0..NCTX {
@@ -532,7 +532,7 @@ impl Cm {
             let cnt = (entry & 1023) as i32;
             let p22 = (entry >> 10) as i32;
             let newp = p22 + (((bit << 22) - p22) / (cnt + 2));
-            let newcnt = if cnt < 255 { cnt + 1 } else { 255 };
+            let newcnt = if cnt < 63 { cnt + 1 } else { 63 };
             self.sm[i][s] = ((newp as u32) << 10) | (newcnt as u32);
             self.st[i][ix] = next_state(s as u8, bit);
         }
