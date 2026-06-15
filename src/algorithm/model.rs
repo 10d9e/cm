@@ -16,9 +16,7 @@ const NCTX: usize = 83; // orders + word/n-gram + strided-sparse + gap bigrams +
 const SM_BASE: usize = NCTX;
 const MM_BASE: usize = 2 * NCTX;
 const NINPUT: usize = 2 * NCTX + 6;
-const TBITS: u32 = 23;
-const TSIZE: usize = 1 << TBITS;
-const TMASK: u32 = (TSIZE as u32) - 1;
+const TBITS: u32 = 23; // default per-model context-table size (2^TBITS slots)
 const MIXCTX: usize = 16384;
 const NL1: usize = 13; // number of layer-1 specialist mixers
 const MIX3CTX: usize = 8192; // order-2 specialist rows
@@ -173,6 +171,7 @@ pub struct Cm {
     st: Vec<Vec<u8>>,  // [NCTX][TSIZE] bit-history state per context slot
     sm: Vec<Vec<u32>>, // [NCTX][256*8] StateMap: (state | bitpos<<8) -> (prob22<<10 | count)
     sm_idx: [usize; NCTX],
+    tmask: [u32; NCTX], // per-model context-table index mask
     rate_tab: [i32; 256],
     ctxhash: [u32; NCTX],
     idx: [usize; NCTX],
@@ -267,9 +266,19 @@ impl Cm {
             if r < RATE_FLOOR { r = RATE_FLOOR; }
             rate_tab[n] = r;
         }
-        let cp = (0..NCTX).map(|_| vec![2048u16; TSIZE]).collect();
-        let cn = (0..NCTX).map(|_| vec![0u8; TSIZE]).collect();
-        let st = (0..NCTX).map(|_| vec![0u8; TSIZE]).collect();
+        // Per-model context-table sizes. All models use the full 2^TBITS table
+        // except order-0 (ctxhash[0] == 0), whose index is just the partial-byte
+        // c0 (<=255); a 512-slot table is byte-for-byte identical there, saving
+        // ~32 MB at zero cost to compression.
+        let mut tb = [TBITS; NCTX];
+        tb[0] = 9;
+        let mut tmask = [0u32; NCTX];
+        for i in 0..NCTX {
+            tmask[i] = (1u32 << tb[i]) - 1;
+        }
+        let cp: Vec<Vec<u16>> = (0..NCTX).map(|i| vec![2048u16; 1usize << tb[i]]).collect();
+        let cn: Vec<Vec<u8>> = (0..NCTX).map(|i| vec![0u8; 1usize << tb[i]]).collect();
+        let st: Vec<Vec<u8>> = (0..NCTX).map(|i| vec![0u8; 1usize << tb[i]]).collect();
         let sm = (0..NCTX).map(|_| vec![1u32 << 31; 256 * 8]).collect();
         let l1 = vec![
             Mixer::new(NINPUT, MIXCTX, 12),
@@ -311,6 +320,7 @@ impl Cm {
             st,
             sm,
             sm_idx: [0; NCTX],
+            tmask,
             rate_tab,
             ctxhash: [0; NCTX],
             idx: [0; NCTX],
@@ -916,7 +926,7 @@ impl Cm {
     #[inline]
     pub fn predict(&mut self) -> i32 {
         for i in 0..NCTX {
-            let ix = (self.ctxhash[i].wrapping_mul(769).wrapping_add(self.c0 as u32) & TMASK) as usize;
+            let ix = (self.ctxhash[i].wrapping_mul(769).wrapping_add(self.c0 as u32) & self.tmask[i]) as usize;
             self.idx[i] = ix;
             self.mix_in[i] = self.stretch[self.cp[i][ix] as usize];
             let mi = (self.st[i][ix] as usize) | ((self.bitcount as usize) << 8);
