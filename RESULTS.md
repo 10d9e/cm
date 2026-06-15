@@ -31,7 +31,8 @@ Leaderboard of recorded submissions. Full narratives live in
 | 0024 | 2026-06-15 | @10d9e | 583001 | -252 (new record) | +15.71% | `1ce805f` | [0024](history/entries/0024--10d9e.md) | Adds a seventh layer-1 specialist mixer selected by the byte column since the la… |
 | 0025 | 2026-06-15 | @10d9e | 582758 | -243 (new record) | +15.75% | `1696f2b` | [0025](history/entries/0025--10d9e.md) | Adds an eighth layer-1 specialist mixer selected by a hash of the last four byte… |
 | 0026 | 2026-06-15 | @10d9e | 582663 | -95 (new record) | +15.76% | `b0d13d3` | [0026](history/entries/0026--10d9e.md) | Adds a ninth layer-1 specialist mixer selected by a hash of the last six bytes (… |
+| 0027 | 2026-06-15 | @10d9e | 582587 | -76 (new record) | +15.77% | `9330f7c` | [0027](history/entries/0027--10d9e.md) | Re-tunes the layer-1 specialist mixers' weight-update rate from 14/65536 to 12/6… |
 
-**Current record: 582663** (@10d9e, entry 0026)
+**Current record: 582587** (@10d9e, entry 0027)
 
 Ledger updates are **CI-only** — see [`.github/workflows/scorekeeper.yml`](.github/workflows/scorekeeper.yml).
