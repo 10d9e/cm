@@ -8,7 +8,7 @@
 
 use super::tables::{build, squash_d};
 
-const NCTX: usize = 26; // orders 0..9/11 + word + 5 sparse + text shape/layout + order-5 + word n-grams
+const NCTX: usize = 47; // orders 0..11/13/16 + word + 23 sparse + text shape/layout + order-5 + word n-grams
 // Mixer input layout:
 //   [0 .. NCTX)            direct adaptive counters
 //   [SM_BASE .. SM_BASE+NCTX) bit-history StateMap predictions (one per context)
@@ -544,6 +544,140 @@ impl Cm {
         } else {
             0
         };
+        // order-10: c4 plus bytes pos-5..pos-10 (fills the gap below order-11).
+        self.ctxhash[26] = if self.pos >= 10 {
+            hashk(
+                0x1A00,
+                c4.wrapping_mul(0x2545_f491)
+                    ^ ((self.b(self.pos - 5) as u32).wrapping_mul(0x85eb_ca6b))
+                    ^ ((self.b(self.pos - 6) as u32).wrapping_mul(0xc2b2_ae35))
+                    ^ ((self.b(self.pos - 7) as u32).wrapping_mul(0x27d4_eb2f))
+                    ^ ((self.b(self.pos - 8) as u32).wrapping_mul(0x1656_67b1))
+                    ^ ((self.b(self.pos - 9) as u32).wrapping_mul(0xff51_afd7))
+                    ^ ((self.b(self.pos - 10) as u32).wrapping_mul(0xc4ce_b9fe)),
+            )
+        } else {
+            hashk(0x1A00, c4)
+        };
+        // order-13: extends the direct-context ladder past order-11.
+        self.ctxhash[27] = if self.pos >= 13 {
+            hashk(
+                0x1B00,
+                c4.wrapping_mul(0xc2b2_ae35)
+                    ^ ((self.b(self.pos - 5) as u32).wrapping_mul(0x85eb_ca6b))
+                    ^ ((self.b(self.pos - 6) as u32).wrapping_mul(0xc2b2_ae35))
+                    ^ ((self.b(self.pos - 7) as u32).wrapping_mul(0x27d4_eb2f))
+                    ^ ((self.b(self.pos - 8) as u32).wrapping_mul(0x1656_67b1))
+                    ^ ((self.b(self.pos - 9) as u32).wrapping_mul(0xff51_afd7))
+                    ^ ((self.b(self.pos - 10) as u32).wrapping_mul(0xc4ce_b9fe))
+                    ^ ((self.b(self.pos - 11) as u32).wrapping_mul(0x2545_f491))
+                    ^ ((self.b(self.pos - 12) as u32).wrapping_mul(0x9e37_79b9))
+                    ^ ((self.b(self.pos - 13) as u32).wrapping_mul(0x7f4a_7c15)),
+            )
+        } else {
+            hashk(0x1B00, c4)
+        };
+        // order-16: a very long deterministic context for structured / repetitive
+        // data, beyond what the match models alone cover.
+        self.ctxhash[28] = if self.pos >= 16 {
+            let mut h = c4.wrapping_mul(0x9e37_79b1);
+            let mut k: u32 = 5;
+            let mults: [u32; 12] = [
+                0x85eb_ca6b, 0xc2b2_ae35, 0x27d4_eb2f, 0x1656_67b1, 0xff51_afd7,
+                0xc4ce_b9fe, 0x2545_f491, 0x9e37_79b9, 0x7f4a_7c15, 0x94d0_49bb,
+                0xd6e8_feb8, 0xa548_1ad7,
+            ];
+            while k <= 16 {
+                h ^= (self.b(self.pos - k) as u32).wrapping_mul(mults[(k - 5) as usize]);
+                k += 1;
+            }
+            hashk(0x1C00, h)
+        } else {
+            hashk(0x1C00, c4)
+        };
+        // stride-3 sparse: bytes at pos-3, pos-6, pos-9 (columnar / record-aligned).
+        self.ctxhash[29] = if self.pos >= 9 {
+            hashk(
+                0x1D00,
+                (self.b(self.pos - 3) as u32)
+                    | ((self.b(self.pos - 6) as u32) << 8)
+                    | ((self.b(self.pos - 9) as u32) << 16),
+            )
+        } else {
+            hashk(0x1D00, c4)
+        };
+        // stride-4 sparse: bytes at pos-4, pos-8, pos-12 (wider record alignment).
+        self.ctxhash[30] = if self.pos >= 12 {
+            hashk(
+                0x1E00,
+                (self.b(self.pos - 4) as u32)
+                    | ((self.b(self.pos - 8) as u32) << 8)
+                    | ((self.b(self.pos - 12) as u32) << 16),
+            )
+        } else {
+            hashk(0x1E00, c4)
+        };
+        // stride-5 sparse: bytes at pos-5, pos-10, pos-15.
+        self.ctxhash[31] = if self.pos >= 15 {
+            hashk(
+                0x1F00,
+                (self.b(self.pos - 5) as u32)
+                    | ((self.b(self.pos - 10) as u32) << 8)
+                    | ((self.b(self.pos - 15) as u32) << 16),
+            )
+        } else {
+            hashk(0x1F00, c4)
+        };
+        // stride-6 sparse: bytes at pos-6, pos-12, pos-18.
+        self.ctxhash[32] = if self.pos >= 18 {
+            hashk(
+                0x2000,
+                (self.b(self.pos - 6) as u32)
+                    | ((self.b(self.pos - 12) as u32) << 8)
+                    | ((self.b(self.pos - 18) as u32) << 16),
+            )
+        } else {
+            hashk(0x2000, c4)
+        };
+        // stride-7 sparse: bytes at pos-7, pos-14, pos-21.
+        self.ctxhash[33] = if self.pos >= 21 {
+            hashk(
+                0x2100,
+                (self.b(self.pos - 7) as u32)
+                    | ((self.b(self.pos - 14) as u32) << 8)
+                    | ((self.b(self.pos - 21) as u32) << 16),
+            )
+        } else {
+            hashk(0x2100, c4)
+        };
+        // stride-8 sparse: bytes at pos-8, pos-16, pos-24.
+        self.ctxhash[34] = if self.pos >= 24 {
+            hashk(
+                0x2200,
+                (self.b(self.pos - 8) as u32)
+                    | ((self.b(self.pos - 16) as u32) << 8)
+                    | ((self.b(self.pos - 24) as u32) << 16),
+            )
+        } else {
+            hashk(0x2200, c4)
+        };
+        // stride-9..16 sparse: three samples at each stride (record alignments).
+        for (slot, stride, tag) in [
+            (35usize, 9u32, 0x2300u32), (36, 10, 0x2400), (37, 11, 0x2500), (38, 12, 0x2600),
+            (39, 13, 0x2700), (40, 14, 0x2800), (41, 15, 0x2900), (42, 16, 0x2A00),
+            (43, 17, 0x2B00), (44, 18, 0x2C00), (45, 19, 0x2D00), (46, 20, 0x2E00),
+        ] {
+            self.ctxhash[slot] = if self.pos >= stride * 3 {
+                hashk(
+                    tag,
+                    (self.b(self.pos - stride) as u32)
+                        | ((self.b(self.pos - stride * 2) as u32) << 8)
+                        | ((self.b(self.pos - stride * 3) as u32) << 16),
+                )
+            } else {
+                hashk(tag, c4)
+            };
+        }
     }
 
     #[inline]
