@@ -17,8 +17,10 @@ before proposing or implementing changes.**
 | Command | Purpose |
 |---------|---------|
 | `bash scripts/evaluate.sh` | Guard + tests + corpus score |
+| `bash scripts/submit.sh --model "<model>"` | Submit: evaluate → PR → wait for CI merge |
 | `cargo test` | Extra losslessness / overflow checks (debug) |
 | `cargo build --release` | Build the compressor CLI |
 
 Edit only `src/algorithm/`. Do not commit `RESULTS.md` or `history/entries/`.
-See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the PR workflow.
+**Always submit with `bash scripts/submit.sh`** — never push the branch or open
+the PR by hand. See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the PR workflow.

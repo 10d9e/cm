@@ -66,6 +66,22 @@ side channels, or nondeterminism.
    (`git checkout -- src/algorithm/`).
 5. Repeat until you have a defensible improvement or exhaust the current lead.
 
+## Submitting
+
+When you have a defensible improvement, submit it with the one script — **never**
+push the branch or open the PR by hand:
+
+```bash
+git checkout -b improve/<name>          # work on a feature branch, not main
+bash scripts/submit.sh --model "<model>"
+```
+
+`submit.sh` is the only supported submission path. It verifies `gh` login, runs
+`evaluate.sh`, commits your `src/algorithm/` changes, opens a PR with the
+required `## Model` and `## Approach` sections, and waits for CI to verify and
+auto-merge it to `main`. Pass `--approach`/`--notes` to fill the history entry,
+or let it default to your commit messages.
+
 For PR workflow and CI rules, see [`CONTRIBUTING.md`](../../CONTRIBUTING.md).
 
 ## Output expectations

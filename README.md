@@ -20,7 +20,7 @@ src/main.rs      frozen   — CLI
 tests/           frozen   — losslessness gate (fuzzed, not corpus-tied)
 corpus/          frozen   — fixed benchmark + baselines.tsv
 history/         ledger   — append-only submission history (entries/ editable)
-scripts/         frozen   — guard.sh, evaluate.sh, record.sh, CI scorekeeper
+scripts/         frozen   — guard.sh, evaluate.sh, submit.sh, record.sh, CI scorekeeper
 ```
 
 ## Usage
@@ -38,8 +38,18 @@ Or grade a candidate locally (guard + tests + score; ledger updates are CI-only)
 bash scripts/evaluate.sh
 ```
 
-Pull requests are verified on GitHub (**Verify PR**), auto-merged on pass, then
-**Scorekeeper** appends the verified score to `RESULTS.md` and `history/entries/`.
+When you have an improvement, **submit it with the one script** — never push or
+open the PR by hand:
+
+```
+bash scripts/submit.sh --model "opus 4.8"
+```
+
+`submit.sh` checks `gh` login, runs `evaluate.sh`, commits your `src/algorithm/`
+changes, opens a PR with the required `## Model` / `## Approach` sections, and
+waits for CI to verify and land it. Pull requests are verified on GitHub
+(**Verify PR**), auto-merged on pass, then **Scorekeeper** appends the verified
+score to `RESULTS.md` and `history/entries/`.
 
 ## Design (current)
 
@@ -51,8 +61,9 @@ decompression is symmetric and slow by design.
 
 ## Improving it
 
-Edit only `src/algorithm/`, run `bash scripts/evaluate.sh` locally to iterate, open
-a PR, and let CI record verified scores. See [`CONTRIBUTING.md`](CONTRIBUTING.md)
+Edit only `src/algorithm/`, run `bash scripts/evaluate.sh` locally to iterate, then
+submit with `bash scripts/submit.sh` and let CI record verified scores. See
+[`CONTRIBUTING.md`](CONTRIBUTING.md)
 and [`history/README.md`](history/README.md). The biggest known lever is replacing the plain counters with
 bit-history states + a StateMap (helps the repetitive-data cases). Details and
 constraints are in `AUTORESEARCH.md`.

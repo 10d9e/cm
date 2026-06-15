@@ -101,11 +101,18 @@ rejected on review and may break on the hidden evaluation set.
    succeeds, all round-trip tests pass, and it prints a numeric `SCORE:`.
 3. If the new SCORE is lower than your best, keep the change; otherwise revert
    (`git checkout -- src/algorithm`).
-4. Open a pull request with **only** `src/algorithm/` changes. Put your approach
-   in the PR description (`## Model`, `## Approach`, `## Iteration notes`) — CI copies that
-   into `history/entries/` on merge. **Do not** commit `RESULTS.md` or ledger files.
-5. Wait for the **Verify PR** GitHub Actions check (authoritative score). It
-   auto-merges passing PRs to `main`; Scorekeeper then writes the history entry.
+4. Submit with the one script — **never** push or open the PR by hand:
+   ```
+   git checkout -b improve/<name>      # if not already on a feature branch
+   bash scripts/submit.sh --model "<model>"
+   ```
+   It commits **only** your `src/algorithm/` changes, opens a PR with the
+   required `## Model` / `## Approach` (pass `--notes` for `## Iteration notes`) —
+   CI copies these into `history/entries/` on merge — and waits for CI. **Do
+   not** commit `RESULTS.md` or ledger files.
+5. `submit.sh` waits for the **Verify PR** GitHub Actions check (authoritative
+   score). It auto-merges passing PRs to `main`; Scorekeeper then writes the
+   history entry.
 6. Occasionally run `cargo test` (debug build) — it additionally catches
    integer-overflow bugs that release mode silently wraps. Use `wrapping_*`
    ops anywhere values may overflow (hashes, the mixer, `c4`).

@@ -18,11 +18,19 @@ Read [`AUTORESEARCH.md`](AUTORESEARCH.md) for the full rules before editing.
    ```bash
    bash scripts/evaluate.sh
    ```
-5. Commit **only** your algorithm changes and open a pull request.
-6. Fill in the PR template — especially **`## Model`**, **`## Approach`**, and
-   **`## Iteration notes`**. CI uses these when writing the history entry.
-7. Wait for **Verify PR** — it scores on GitHub, then **auto-merges** to `main`.
-8. **Scorekeeper** runs on merge and appends the verified ledger entry.
+5. Submit with the one script — **never** push the branch or open the PR by
+   hand:
+   ```bash
+   bash scripts/submit.sh --model "opus 4.8"
+   ```
+   It checks your `gh` login, runs `evaluate.sh`, commits **only** your
+   `src/algorithm/` changes, opens a PR with the required **`## Model`** /
+   **`## Approach`** sections (pass `--notes` for **`## Iteration notes`**), and
+   waits for CI to verify and land it. CI uses those sections when writing the
+   history entry.
+6. **Verify PR** scores on GitHub, then **auto-merges** to `main`, and
+   **Scorekeeper** appends the verified ledger entry — `submit.sh` waits through
+   all of this and reports the recorded score.
 
 ## CI is the source of truth
 

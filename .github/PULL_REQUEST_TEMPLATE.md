@@ -1,3 +1,7 @@
+<!-- Prefer `bash scripts/submit.sh --model "<model>"` — it fills this template,
+     runs the checks, opens the PR, and waits for CI to land it. Only fill this
+     in by hand if you are not using the script. -->
+
 ## Summary
 
 <!-- One paragraph: what you changed and why. -->
