@@ -8,7 +8,7 @@
 
 use super::tables::{build, squash_d};
 
-const NCTX: usize = 17; // context models: orders 0..9 + word + sparse + text shape/layout
+const NCTX: usize = 23; // orders 0..9/11 + word + 5 sparse + text shape/layout + order-5
 // Mixer input layout:
 //   [0 .. NCTX)            direct adaptive counters
 //   [SM_BASE .. SM_BASE+NCTX) bit-history StateMap predictions (one per context)
@@ -370,6 +370,70 @@ impl Cm {
             0x1000,
             ((self.col & 63) << 8) ^ class ^ self.wordhash.wrapping_mul(0x9e37_79b1),
         );
+        // order-5: the four bytes in c4 plus the byte at pos-5.
+        self.ctxhash[17] = if self.pos >= 5 {
+            hashk(
+                0x1100,
+                c4.wrapping_mul(0x2545_f491)
+                    ^ ((self.b(self.pos - 5) as u32).wrapping_mul(0x9e37_79b1)),
+            )
+        } else {
+            hashk(0x1100, c4)
+        };
+        // order-11: c4 plus bytes pos-5..pos-11.
+        self.ctxhash[18] = if self.pos >= 11 {
+            hashk(
+                0x1200,
+                c4.wrapping_mul(0x9e37_79b1)
+                    ^ ((self.b(self.pos - 5) as u32).wrapping_mul(0x85eb_ca6b))
+                    ^ ((self.b(self.pos - 6) as u32).wrapping_mul(0xc2b2_ae35))
+                    ^ ((self.b(self.pos - 7) as u32).wrapping_mul(0x27d4_eb2f))
+                    ^ ((self.b(self.pos - 8) as u32).wrapping_mul(0x1656_67b1))
+                    ^ ((self.b(self.pos - 9) as u32).wrapping_mul(0xff51_afd7))
+                    ^ ((self.b(self.pos - 10) as u32).wrapping_mul(0xc4ce_b9fe))
+                    ^ ((self.b(self.pos - 11) as u32).wrapping_mul(0x2545_f491)),
+            )
+        } else {
+            hashk(0x1200, c4)
+        };
+        // stride-2 sparse: bytes at pos-2, pos-4, pos-6 (skips every other byte).
+        self.ctxhash[19] = if self.pos >= 6 {
+            hashk(
+                0x1300,
+                (self.b(self.pos - 2) as u32)
+                    | ((self.b(self.pos - 4) as u32) << 8)
+                    | ((self.b(self.pos - 6) as u32) << 16),
+            )
+        } else {
+            hashk(0x1300, c4)
+        };
+        // gap bigram: bytes at pos-1 and pos-3 (skips pos-2).
+        self.ctxhash[20] = if self.pos >= 3 {
+            hashk(
+                0x1400,
+                (c4 & 0xff) | ((self.b(self.pos - 3) as u32) << 8),
+            )
+        } else {
+            hashk(0x1400, c4)
+        };
+        // gap bigram: bytes at pos-1 and pos-4 (skips pos-2, pos-3).
+        self.ctxhash[21] = if self.pos >= 4 {
+            hashk(
+                0x1500,
+                (c4 & 0xff) | ((self.b(self.pos - 4) as u32) << 8),
+            )
+        } else {
+            hashk(0x1500, c4)
+        };
+        // gap bigram: bytes at pos-1 and pos-5.
+        self.ctxhash[22] = if self.pos >= 5 {
+            hashk(
+                0x1600,
+                (c4 & 0xff) | ((self.b(self.pos - 5) as u32) << 8),
+            )
+        } else {
+            hashk(0x1600, c4)
+        };
     }
 
     #[inline]
@@ -513,7 +577,7 @@ impl Cm {
         let err = (bit << 12) - p;
         let base = self.mixsel * NINPUT;
         for i in 0..NINPUT {
-            let delta = (self.mix_in[i] * err * 3) >> 15;
+            let delta = (self.mix_in[i] * err * 5) >> 16;
             self.w[base + i] = self.w[base + i].wrapping_add(delta);
         }
         for i in 0..NCTX {
