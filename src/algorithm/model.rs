@@ -217,6 +217,7 @@ pub struct Cm {
     apm1: Apm,
     apm2: Apm,
     apm3: Apm,
+    apm4: Apm,
     c0: i32,
     bitcount: i32,
     c4: u32,
@@ -258,6 +259,7 @@ impl Cm {
         let apm1 = Apm::new(1024, &squash);
         let apm2 = Apm::new(16384, &squash);
         let apm3 = Apm::new(1024, &squash);
+        let apm4 = Apm::new(1024, &squash);
 
         Cm {
             stretch,
@@ -315,6 +317,7 @@ impl Cm {
             apm1,
             apm2,
             apm3,
+            apm4,
             c0: 1,
             bitcount: 0,
             c4: 0,
@@ -812,6 +815,14 @@ impl Cm {
         p = (p + 3 * a3) >> 2;
         if p < 1 { p = 1; }
         if p > 4094 { p = 4094; }
+        // Match-length SSE: calibrate by how long the current order-6 match runs.
+        let a4ctx = ((self.matchlen as usize) & 0xff)
+            | (if self.matchlen3 > 0 { 256 } else { 0 })
+            | (if self.matchlen4 > 0 { 512 } else { 0 });
+        let a4 = self.apm4.apply(&self.stretch, a4ctx, p);
+        p = (3 * p + a4) >> 2;
+        if p < 1 { p = 1; }
+        if p > 4094 { p = 4094; }
         p
     }
 
@@ -821,6 +832,7 @@ impl Cm {
         self.apm1.update(bit);
         self.apm2.update(bit);
         self.apm3.update(bit);
+        self.apm4.update(bit);
         if self.mm_used {
             let v = self.mm_sm[self.mm_idx] as i32;
             self.mm_sm[self.mm_idx] = (v + (((if bit != 0 { 4095 } else { 0 }) - v) >> 6)) as u16;
