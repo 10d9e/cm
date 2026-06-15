@@ -8,7 +8,7 @@
 
 use super::tables::{build, squash_d};
 
-const NCTX: usize = 82; // orders + word/n-gram + strided-sparse + gap bigrams + 2D + record + indirect(+word) + text shape/layout
+const NCTX: usize = 83; // orders + word/n-gram + strided-sparse + gap bigrams + 2D + record + indirect + run + text shape/layout
 // Mixer input layout:
 //   [0 .. NCTX)            direct adaptive counters
 //   [SM_BASE .. SM_BASE+NCTX) bit-history StateMap predictions (one per context)
@@ -232,6 +232,7 @@ pub struct Cm {
     prevword2: u32,
     prevword3: u32,
     c1: i32,
+    run_len: u32, // length of the current run of identical bytes
     col: u32,
     line_start: u32,
     prev_line_start: u32,
@@ -362,6 +363,7 @@ impl Cm {
             prevword2: 0,
             prevword3: 0,
             c1: 0,
+            run_len: 1,
             col: 0,
             line_start: 0,
             prev_line_start: 0,
@@ -890,6 +892,9 @@ impl Cm {
         } else {
             0
         };
+        // Run model: last byte + the length of its current run (capped). Models
+        // run continuation/termination (zero-runs in binary, repeated chars).
+        self.ctxhash[82] = hashk(0x7100, (c4 & 0xff) | (self.run_len.min(255) << 8));
     }
 
     #[inline]
@@ -1200,6 +1205,11 @@ impl Cm {
             self.buf[bp] = byte;
             self.pos += 1;
             self.c4 = (self.c4 << 8) | byte as u32;
+            if byte as i32 == self.c1 {
+                if self.run_len < 65535 { self.run_len += 1; }
+            } else {
+                self.run_len = 1;
+            }
             self.c1 = byte as i32;
             if byte == b'\n' || byte == b'\r' {
                 self.col = 0;
