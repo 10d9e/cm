@@ -28,7 +28,8 @@ Leaderboard of recorded submissions. Full narratives live in
 | 0021 | 2026-06-15 | @10d9e | 583905 | -371 (new record) | +15.58% | `56ef71a` | [0021](history/entries/0021--10d9e.md) | Adds word-level n-gram/skip-gram context models, targeting natural-language text… |
 | 0022 | 2026-06-15 | @10d9e | 583868 | -37 (new record) | +15.59% | `91f5665` | [0022](history/entries/0022--10d9e.md) | Extends the layer-2 ensemble from four combiners to five, averaged in the logit … |
 | 0023 | 2026-06-15 | @10d9e | 583253 | -615 (new record) | +15.68% | `a5ff3e6` | [0023](history/entries/0023--10d9e.md) | Adds a sixth layer-1 specialist mixer selected by the current match state — th… |
+| 0024 | 2026-06-15 | @10d9e | 583001 | -252 (new record) | +15.71% | `1ce805f` | [0024](history/entries/0024--10d9e.md) | Adds a seventh layer-1 specialist mixer selected by the byte column since the la… |
 
-**Current record: 583253** (@10d9e, entry 0023)
+**Current record: 583001** (@10d9e, entry 0024)
 
 Ledger updates are **CI-only** — see [`.github/workflows/scorekeeper.yml`](.github/workflows/scorekeeper.yml).
