@@ -236,7 +236,7 @@ h1 {
   letter-spacing: 0.04em;
 }
 
-.chart-box { position: relative; height: 340px; }
+.chart-box { position: relative; height: 380px; padding-bottom: 4px; }
 
 /* Table */
 .table-wrap {
@@ -745,7 +745,7 @@ tr:hover .open-btn {
 
 @media (max-width: 760px) {
   .stats { grid-template-columns: repeat(2, 1fr); }
-  .chart-box { height: 280px; }
+  .chart-box { height: 320px; }
   .d-metrics { grid-template-columns: repeat(2, 1fr); }
   .titlebar-inner { padding: 14px 0; }
 }

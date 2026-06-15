@@ -15,7 +15,16 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 RESULTS = ROOT / "RESULTS.md"
+BASELINES = ROOT / "corpus" / "baselines.tsv"
 OUT = ROOT / "docs" / "data" / "leaderboard.json"
+
+BASELINE_LABELS = {
+    "zstd22": "zstd −22",
+    "xz9e": "xz −9e",
+    "brotli11": "brotli −11",
+    "zpaq5": "zpaq m5",
+    "lpaq1_9": "lpaq1 ×9",
+}
 
 ROW_RE = re.compile(r"^\|\s*\d{4}\s*\|")
 LINK_RE = re.compile(r"\[[^\]]*\]\(([^)]+)\)")
@@ -72,6 +81,37 @@ def first_int(s: str) -> int | None:
     return int(m.group()) if m else None
 
 
+def parse_baselines() -> list[dict]:
+    """Sum per-algorithm compressed bytes from corpus/baselines.tsv."""
+    if not BASELINES.is_file():
+        return []
+    lines = BASELINES.read_text(encoding="utf-8").splitlines()
+    if len(lines) < 2:
+        return []
+    headers = lines[0].split("\t")
+    algo_cols = headers[2:]
+    totals = [0] * len(algo_cols)
+    for line in lines[1:]:
+        parts = line.split("\t")
+        for i in range(len(algo_cols)):
+            idx = i + 2
+            if idx < len(parts) and parts[idx].strip().isdigit():
+                totals[i] += int(parts[idx])
+    out = []
+    for col, total in zip(algo_cols, totals):
+        if total <= 0:
+            continue
+        out.append(
+            {
+                "id": col,
+                "label": BASELINE_LABELS.get(col, col),
+                "total": total,
+            }
+        )
+    out.sort(key=lambda b: b["total"])
+    return out
+
+
 def main() -> int:
     repo = os.environ.get("GITHUB_REPOSITORY", "10d9e/cm")
     rows: list[dict] = []
@@ -120,6 +160,7 @@ def main() -> int:
         "repo": repo,
         "generatedAt": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "baseline": baseline,
+        "baselines": parse_baselines(),
         "record": (
             {
                 "id": record_row["id"],

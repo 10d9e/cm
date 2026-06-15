@@ -12,6 +12,7 @@ on:
     branches: [main]
     paths:
       - docs/**
+      - corpus/baselines.tsv
       - RESULTS.md
       - history/**
       - scripts/build-leaderboard.py

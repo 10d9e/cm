@@ -34,6 +34,31 @@ function fmt(n) {
   return n == null ? "—" : n.toLocaleString("en-US");
 }
 
+const BASELINE_COLORS = {
+  zstd22: "rgba(255, 255, 255, 0.22)",
+  xz9e: "rgba(255, 255, 255, 0.16)",
+  brotli11: "rgba(147, 197, 253, 0.45)",
+  lpaq1_9: "rgba(192, 132, 252, 0.5)",
+  zpaq5: "rgba(251, 191, 36, 0.55)",
+};
+
+function baselineDatasets(labels, baselines) {
+  if (!baselines?.length) return [];
+  const n = labels.length;
+  return baselines.map((b) => ({
+    label: b.label,
+    data: Array(n).fill(b.total),
+    borderColor: BASELINE_COLORS[b.id] || "rgba(255, 255, 255, 0.2)",
+    borderDash: [5, 4],
+    borderWidth: 1,
+    pointRadius: 0,
+    pointHoverRadius: 0,
+    fill: false,
+    tension: 0,
+    order: 2,
+  }));
+}
+
 function statCard(label, value, opts = {}) {
   const cls = opts.good ? "value good" : "value";
   const sub = opts.sub ? `<div class="sub">${opts.sub}</div>` : "";
@@ -66,6 +91,7 @@ function renderChart(data) {
   const scored = data.entries.filter((e) => e.score != null);
   const labels = scored.map((e) => `#${e.id}`);
   const scores = scored.map((e) => e.score);
+  const baselines = data.baselines || [];
 
   const ctx = $("#scoreChart").getContext("2d");
   const grad = ctx.createLinearGradient(0, 0, 0, 320);
@@ -78,7 +104,7 @@ function renderChart(data) {
       labels,
       datasets: [
         {
-          label: "SCORE (compressed bytes)",
+          label: "cm SCORE",
           data: scores,
           borderColor: "rgba(255, 255, 255, 0.75)",
           backgroundColor: grad,
@@ -90,7 +116,9 @@ function renderChart(data) {
           pointBackgroundColor: scored.map((e) => (e.isRecord ? "#4ade80" : "rgba(255, 255, 255, 0.55)")),
           pointBorderColor: "#000",
           pointBorderWidth: 2,
+          order: 0,
         },
+        ...baselineDatasets(labels, baselines),
       ],
     },
     options: {
@@ -98,7 +126,18 @@ function renderChart(data) {
       maintainAspectRatio: false,
       interaction: { mode: "index", intersect: false },
       plugins: {
-        legend: { display: false },
+        legend: {
+          display: baselines.length > 0,
+          position: "bottom",
+          labels: {
+            color: "rgba(255, 255, 255, 0.45)",
+            font: { family: "'DM Mono', monospace", size: 9 },
+            boxWidth: 14,
+            boxHeight: 1,
+            padding: 14,
+            usePointStyle: false,
+          },
+        },
         tooltip: {
           backgroundColor: "rgba(0, 0, 0, 0.88)",
           borderColor: "rgba(255, 255, 255, 0.12)",
@@ -108,6 +147,7 @@ function renderChart(data) {
           titleFont: { family: "'JetBrains Mono', monospace", size: 11 },
           bodyFont: { family: "'DM Mono', monospace", size: 10 },
           padding: 12,
+          filter: (item) => item.datasetIndex === 0,
           callbacks: {
             title: (items) => {
               const e = scored[items[0].dataIndex];
