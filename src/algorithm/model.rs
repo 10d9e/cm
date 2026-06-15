@@ -18,7 +18,7 @@ const MM_BASE: usize = 2 * NCTX;
 const NINPUT: usize = 2 * NCTX + 6;
 const TBITS: u32 = 23; // default per-model context-table size (2^TBITS slots)
 const MIXCTX: usize = 16384;
-const NL1: usize = 15; // number of layer-1 specialist mixers
+const NL1: usize = 16; // number of layer-1 specialist mixers
 const MIX3CTX: usize = 8192; // order-2 specialist rows
 const MIX4CTX: usize = 8192; // order-3 specialist rows
 const FBITS: u32 = 21; // indirect order-3/-4 follow-history hash table bits
@@ -305,6 +305,7 @@ impl Cm {
             Mixer::new(NINPUT, 256, 8),
             Mixer::new(NINPUT, 1024, 8),
             Mixer::new(NINPUT, 4096, 8),
+            Mixer::new(NINPUT, 256, 8),
         ];
         let l2 = Mixer::new(NL1, 256, 12);
         let l2b = Mixer::new(NL1, 256, 12);
@@ -1139,6 +1140,25 @@ impl Cm {
         // high-nibble (opcode-class) selector.
         let hnsel = ((self.c4 & 0xf0f0_f0f0).wrapping_mul(0x9e37_79b1) >> 20) as usize;
         self.l2_in[14] = self.l1[14].mix(&self.mix_in, &self.squash, hnsel);
+        // character-class selector (letter/digit/space/other of last 4 bytes) —
+        // a coarse semantic text-mode grouping (analogous to the high-nibble one).
+        let cls = |b: u32| -> usize {
+            let b = b & 0xff;
+            if (b >= 97 && b <= 122) || (b >= 65 && b <= 90) {
+                1
+            } else if b >= 48 && b <= 57 {
+                2
+            } else if b == 32 || b == 9 || b == 10 || b == 13 {
+                3
+            } else {
+                0
+            }
+        };
+        let ccsel = cls(self.c4)
+            | (cls(self.c4 >> 8) << 2)
+            | (cls(self.c4 >> 16) << 4)
+            | (cls(self.c4 >> 24) << 6);
+        self.l2_in[15] = self.l1[15].mix(&self.mix_in, &self.squash, ccsel);
         // Two layer-2 combiners over the layer-1 logits — one keyed on the last
         // byte, one on the within-byte bit position — averaged in the logit domain.
         let d2a = self.l2.mix(&self.l2_in, &self.squash, self.c1 as usize);
@@ -1231,6 +1251,7 @@ impl Cm {
         self.l1[12].update(bit, &self.mix_in);
         self.l1[13].update(bit, &self.mix_in);
         self.l1[14].update(bit, &self.mix_in);
+        self.l1[15].update(bit, &self.mix_in);
         self.l2.update(bit, &self.l2_in);
         self.l2b.update(bit, &self.l2_in);
         self.l2c.update(bit, &self.l2_in);
