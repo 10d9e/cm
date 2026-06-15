@@ -50,7 +50,8 @@ Leaderboard of recorded submissions. Full narratives live in
 | 0043 | 2026-06-15 | @10d9e | 578030 | -126 (new record) | +16.43% | `56c57d9` | [0043](history/entries/0043--10d9e.md) | Restructures the bit-history state byte. Under the reset-recency rule the minori… |
 | 0044 | 2026-06-15 | @10d9e | 577720 | -310 (new record) | +16.48% | `daea46e` | [0044](history/entries/0044--10d9e.md) | Adds a new context family using only the high nibble of each byte, ignoring the … |
 | 0045 | 2026-06-15 | @10d9e | 577319 | -401 (new record) | +16.54% | `1ec6f46` | [0045](history/entries/0045--10d9e.md) | Adds a fifteenth layer-1 specialist mixer selected by the high-nibble (opcode-cl… |
+| 0046 | 2026-06-15 | @10d9e | 576969 | -350 (new record) | +16.59% | `65d60ac` | [0046](history/entries/0046--10d9e.md) | Adds a new context family using the differences between consecutive recent bytes… |
 
-**Current record: 577319** (@10d9e, entry 0045)
+**Current record: 576969** (@10d9e, entry 0046)
 
 Ledger updates are **CI-only** — see [`.github/workflows/scorekeeper.yml`](.github/workflows/scorekeeper.yml).
