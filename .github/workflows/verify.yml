@@ -51,6 +51,13 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Comment score on PR
+        # Best-effort only. Fork PRs run with a read-only GITHUB_TOKEN (GitHub
+        # forces this regardless of the `pull-requests: write` declared above),
+        # so `gh pr comment` fails with "Resource not accessible by integration".
+        # The score is already in the job summary, so a failed comment must not
+        # fail verification — otherwise Auto-merge (gated on a successful Verify
+        # PR run) would never fire for third-party submissions.
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -84,4 +91,7 @@ jobs:
             echo "**Scorekeeper** will append the verified entry to \`RESULTS.md\` and"
             echo "\`history/entries/\` from your PR description (\`## Model\`,"
             echo "\`## Approach\`, \`## Iteration notes\`)."
-          } | gh pr comment "${{ github.event.pull_request.number }}" --body-file -
+          } > /tmp/pr-comment.md
+          if ! gh pr comment "${{ github.event.pull_request.number }}" --body-file /tmp/pr-comment.md; then
+            echo "::warning::Could not post the score comment — fork PRs run with a read-only GITHUB_TOKEN. The score is in the job summary above; this does not affect verification or auto-merge."
+          fi
