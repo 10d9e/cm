@@ -38,11 +38,16 @@ jobs:
           VERIFIED_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
           set -euo pipefail
-          # Resolve the open PR from the verified head commit. (The PR is a field
-          # on the run, not a sub-resource — query by SHA so this also works for
-          # fork PRs.)
-          pr="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${VERIFIED_SHA}/pulls" \
-            --jq '[.[] | select(.state=="open")][0].number // empty' 2>/dev/null || true)"
+          # Resolve the open PR from the verified head commit by matching head.sha
+          # across open PRs. NOTE: the obvious `commits/${SHA}/pulls` endpoint does
+          # NOT work for fork PRs — the head commit lives in the contributor's fork,
+          # so the base repo reports no associated PR and auto-merge silently skips
+          # every third-party submission. Scanning open PRs by head SHA works for
+          # both fork and same-repo PRs.
+          pr="$(gh api --paginate \
+            "repos/${GITHUB_REPOSITORY}/pulls?state=open&per_page=100" \
+            --jq ".[] | select(.head.sha==\"${VERIFIED_SHA}\") | .number" 2>/dev/null \
+            | head -n1 || true)"
           if [[ -z "$pr" ]]; then
             echo "No open PR for ${VERIFIED_SHA}; nothing to merge."
             exit 0
