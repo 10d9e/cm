@@ -344,11 +344,18 @@ impl Cm {
                 assoc[i] = true;
             }
         }
+        // Size the high-cardinality context tables to the input length: a larger
+        // input touches more distinct contexts, so a bigger table keeps the hash
+        // load factor (and the associative-bucket eviction rate) low. General
+        // policy — bigger input, bigger model — not tied to any specific data.
+        // Capped at +1 bit so peak resident memory stays bounded for the verifier
+        // (single-threaded eval at 2^23 assoc is ~5 GB; +2 would risk OOM).
+        let grow: u32 = if expected_len >= 262_144 { 1 } else { 0 };
         let mut tb = [TBITS; NCTX];
         tb[0] = 9;
         for i in 0..NCTX {
             if assoc[i] {
-                tb[i] = 22; // 2^22 slots = 2^19 buckets x 8 ways
+                tb[i] = 22 + grow; // 2^22 slots = 2^19 buckets x 8 ways (×2 for large inputs)
             }
         }
         let mut tmask = [0u32; NCTX];
@@ -1335,14 +1342,14 @@ impl Cm {
         self.l2_in[8] = self.l1[8].mix(&self.mix_in, &self.squash, ctx8);
         // stride-2 sparse selector: bytes at pos-2 and pos-4 (interleaved structure).
         let ctx9 = if self.pos >= 4 {
-            ((self.b(self.pos - 2) as usize) | ((self.b(self.pos - 4) as usize) << 8))
+            (self.b(self.pos - 2) as usize) | ((self.b(self.pos - 4) as usize) << 8)
         } else {
             self.c1 as usize
         };
         self.l2_in[9] = self.l1[9].mix(&self.mix_in, &self.squash, ctx9);
         // stride-3 sparse selector: bytes at pos-3 and pos-6.
         let ctx10 = if self.pos >= 6 {
-            ((self.b(self.pos - 3) as usize) | ((self.b(self.pos - 6) as usize) << 8))
+            (self.b(self.pos - 3) as usize) | ((self.b(self.pos - 6) as usize) << 8)
         } else {
             self.c1 as usize
         };
