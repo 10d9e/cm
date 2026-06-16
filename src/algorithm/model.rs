@@ -6,6 +6,7 @@
 //! lossless on all inputs and the predict/update sequence stays identical
 //! between encode and decode.
 
+use super::dmc::Dmc;
 use super::tables::{build, build16, squash16_d, squash_d};
 
 const NCTX: usize = 99; // orders + word/n-gram + sparse + 2D + record + indirect + run + nest + nibble + text shape/layout
@@ -15,7 +16,8 @@ const NCTX: usize = 99; // orders + word/n-gram + sparse + 2D + record + indirec
 //   [MM_BASE .. MM_BASE+5)  five match models (order-6, -8, -10, -12, -14)
 const SM_BASE: usize = NCTX;
 const MM_BASE: usize = 2 * NCTX;
-const NINPUT: usize = 2 * NCTX + 6;
+const DMC_IN: usize = 2 * NCTX + 6; // DMC variable-order prediction (one extra input)
+const NINPUT: usize = 2 * NCTX + 7;
 const TBITS: u32 = 23; // default per-model context-table size (2^TBITS slots)
 const MIXCTX: usize = 16384;
 const NL1: usize = 27; // number of layer-1 specialist mixers
@@ -277,6 +279,7 @@ pub struct Cm {
     apm2: Apm,
     apm3: Apm,
     apm4: Apm,
+    dmc: Dmc,
     c0: i32,
     bitcount: i32,
     c4: u32,
@@ -509,6 +512,7 @@ impl Cm {
             apm2,
             apm3,
             apm4,
+            dmc: Dmc::new(),
             c0: 1,
             bitcount: 0,
             c4: 0,
@@ -1302,6 +1306,8 @@ impl Cm {
                 self.matchlen6 = 0;
             }
         }
+        // DMC variable-order Markov prediction — one extra mixer input.
+        self.mix_in[DMC_IN] = self.dmc.predict(&self.stretch);
         // Layer-1 specialist mixers, each selected by a different context:
         //   m0 — the proven last-byte + match-activity context (full resolution)
         //   m1 — the within-byte partial-byte context (order-0 bit position)
@@ -1560,6 +1566,7 @@ impl Cm {
         self.apm2.update(bit);
         self.apm3.update(bit);
         self.apm4.update(bit);
+        self.dmc.update(bit);
         if self.mm_used {
             let v = self.mm_sm[self.mm_idx] as i32;
             self.mm_sm[self.mm_idx] = (v + (((if bit != 0 { 4095 } else { 0 }) - v) >> 6)) as u16;
