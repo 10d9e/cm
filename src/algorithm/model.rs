@@ -18,7 +18,7 @@ const MM_BASE: usize = 2 * NCTX;
 const NINPUT: usize = 2 * NCTX + 6;
 const TBITS: u32 = 23; // default per-model context-table size (2^TBITS slots)
 const MIXCTX: usize = 16384;
-const NL1: usize = 24; // number of layer-1 specialist mixers
+const NL1: usize = 27; // number of layer-1 specialist mixers
 const L1LR: i32 = 8; // layer-1 specialist learning rate
 const L2LR: i32 = 10; // layer-2 combiner learning rate
 const MIX3CTX: usize = 8192; // order-2 specialist rows
@@ -214,6 +214,7 @@ pub struct Cm {
     l2g: Mixer,       // seventh layer-2 combiner (char-class / text-mode ctx)
     l2h: Mixer,       // eighth layer-2 combiner (nesting-state ctx)
     l2i: Mixer,       // ninth layer-2 combiner (byte-above / 2D ctx)
+    l2j: Mixer,       // tenth layer-2 combiner (byte-delta / numeric ctx)
     l2_in: [i32; NL1],
     buf: Vec<u8>,
     bufmask: u32,
@@ -357,6 +358,9 @@ impl Cm {
             Mixer::new(NINPUT, 32, q),  // gradient-magnitude selector
             Mixer::new(NINPUT, 32, q),  // vertical-repeat + match selector
             Mixer::new(NINPUT, 256, q), // bit-position + match-state selector
+            Mixer::new(NINPUT, 64, q),  // opcode-trigram (3 high nibbles) selector
+            Mixer::new(NINPUT, 64, q),  // delta sign+magnitude selector
+            Mixer::new(NINPUT, 64, q),  // column-bucket + char-class selector
         ];
         let l2 = Mixer::new(NL1, 256, L2LR);
         let l2b = Mixer::new(NL1, 256, L2LR);
@@ -367,6 +371,7 @@ impl Cm {
         let l2g = Mixer::new(NL1, 256, L2LR);
         let l2h = Mixer::new(NL1, 256, L2LR);
         let l2i = Mixer::new(NL1, 512, L2LR);
+        let l2j = Mixer::new(NL1, 256, L2LR);
 
         let mut bufsize: u32 = 1;
         while (bufsize as usize) < expected_len + 16 && bufsize < (1 << 27) {
@@ -402,6 +407,7 @@ impl Cm {
             l2g,
             l2h,
             l2i,
+            l2j,
             l2_in: [0; NL1],
             buf: vec![0u8; bufsize as usize],
             bufmask: bufsize - 1,
@@ -1364,6 +1370,34 @@ impl Cm {
         let bmsel = (self.c0 as usize & 0x7f)
             | (if self.matchlen > 0 { 128 } else { 0 });
         self.l2_in[23] = self.l1[23].mix(&self.mix_in, &self.squash, bmsel);
+        // opcode-trigram selector: the high nibbles of the last three bytes — a
+        // coarse instruction-class trigram (binary), distinct from the existing
+        // single-nibble selector.
+        let optri = (((self.c4 >> 4) & 0xf)
+            | (((self.c4 >> 12) & 0xf) << 2)
+            | (((self.c4 >> 20) & 0xf) << 4)) as usize & 63;
+        self.l2_in[24] = self.l1[24].mix(&self.mix_in, &self.squash, optri);
+        // delta sign+magnitude selector: the last byte difference bucketed by
+        // both sign and coarse magnitude (numeric trend, finer than sign alone).
+        let dsm = {
+            let d = (self.c4 & 0xff).wrapping_sub((self.c4 >> 8) & 0xff) & 0xff;
+            let neg = d >= 128;
+            let m = if neg { 256 - d } else { d };
+            let mb = if m == 0 { 0 } else if m <= 4 { 1 } else if m <= 32 { 2 } else { 3 };
+            (mb | (if neg { 4 } else { 0 })) as usize
+        };
+        let dsmsel = dsm | (cls(self.c4) << 3);
+        self.l2_in[25] = self.l1[25].mix(&self.mix_in, &self.squash, dsmsel);
+        // column-bucket + char-class selector: a layout / text-shape mode keyed
+        // on coarse column position and the last-byte class.
+        let colb = {
+            let c = self.col;
+            if c == 0 { 0 } else if c < 4 { 1 } else if c < 8 { 2 }
+            else if c < 16 { 3 } else if c < 32 { 4 } else if c < 64 { 5 }
+            else if c < 128 { 6 } else { 7 }
+        };
+        let wlsel = colb | (cls(self.c4) << 3);
+        self.l2_in[26] = self.l1[26].mix(&self.mix_in, &self.squash, wlsel);
         // Two layer-2 combiners over the layer-1 logits — one keyed on the last
         // byte, one on the within-byte bit position — averaged in the logit domain.
         let d2a = self.l2.mix(&self.l2_in, &self.squash, self.c1 as usize);
@@ -1394,7 +1428,15 @@ impl Cm {
         let d2h = self.l2h.mix(&self.l2_in, &self.squash, l2hctx);
         let l2ictx = (self.above_byte as usize) | ((self.c1 as usize & 1) << 9);
         let d2i = self.l2i.mix(&self.l2_in, &self.squash, l2ictx);
-        let mut p = squash_d(&self.squash, (d2a + d2b + d2c + d2d + d2e + d2f + d2g + d2h + d2i) / 9);
+        // numeric-regime combiner: keyed on the byte-delta pattern of the last
+        // three differences (captures gradient/tabular regimes).
+        let l2jctx = (dsmsel & 0xff)
+            | ((dsign(self.c4 >> 8, self.c4 >> 16)) << 6);
+        let d2j = self.l2j.mix(&self.l2_in, &self.squash, l2jctx & 0xff);
+        let mut p = squash_d(
+            &self.squash,
+            (d2a + d2b + d2c + d2d + d2e + d2f + d2g + d2h + d2i + d2j) / 10,
+        );
         if p < 1 { p = 1; }
         if p > 4094 { p = 4094; }
 
@@ -1480,6 +1522,9 @@ impl Cm {
         self.l1[21].update(bit, &self.mix_in);
         self.l1[22].update(bit, &self.mix_in);
         self.l1[23].update(bit, &self.mix_in);
+        self.l1[24].update(bit, &self.mix_in);
+        self.l1[25].update(bit, &self.mix_in);
+        self.l1[26].update(bit, &self.mix_in);
         self.l2.update(bit, &self.l2_in);
         self.l2b.update(bit, &self.l2_in);
         self.l2c.update(bit, &self.l2_in);
@@ -1489,6 +1534,7 @@ impl Cm {
         self.l2g.update(bit, &self.l2_in);
         self.l2h.update(bit, &self.l2_in);
         self.l2i.update(bit, &self.l2_in);
+        self.l2j.update(bit, &self.l2_in);
         for i in 0..NCTX {
             let ix = self.idx[i];
             let n = self.cn[i][ix] as i32;
@@ -1505,7 +1551,7 @@ impl Cm {
             let cnt = (entry & 1023) as i32;
             let p22 = (entry >> 10) as i32;
             let newp = p22 + (((bit << 22) - p22) / (cnt + 2));
-            let newcnt = if cnt < 255 { cnt + 1 } else { 255 };
+            let newcnt = if cnt < 511 { cnt + 1 } else { 511 };
             self.sm[i][s] = ((newp as u32) << 10) | (newcnt as u32);
             self.st[i][ix] = next_state(s as u8, bit);
         }
