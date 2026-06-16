@@ -32,11 +32,10 @@ jobs:
           fi
 
       - name: Correctness gate + score
-        run: bash scripts/evaluate.sh --no-guard
-
-      - name: Summarize score
         run: |
-          ./target/release/cm eval corpus 2>&1 | tee /tmp/eval.out
+          set -euo pipefail
+          bash scripts/evaluate.sh --no-guard 2>&1 | tee /tmp/evaluate_full.out
+          awk '/^== score ==$/{found=1; next} found' /tmp/evaluate_full.out > /tmp/eval.out
           score="$(grep '^SCORE:' /tmp/eval.out || true)"
           {
             echo "## Verification passed"
