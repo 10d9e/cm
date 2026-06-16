@@ -60,7 +60,8 @@ Leaderboard of recorded submissions. Full narratives live in
 | 0053 | 2026-06-16 | @10d9e | 574203 | -881 (new record) | +16.99% | `f3fee9e` | [0053](history/entries/0053--10d9e.md) | Replaces direct-mapped context hash tables with 4-way set-associative buckets fo… |
 | 0054 | 2026-06-16 | @10d9e | 574135 | -68 (new record) | +17.00% | `dd3f50b` | [0054](history/entries/0054--10d9e.md) | Widens the set-associative context tables (added in the previous record) from 4 … |
 | 0055 | 2026-06-16 | @10d9e | 573541 | -594 (new record) | +17.08% | `9c85361` | [0055](history/entries/0055--10d9e.md) | Raises the prediction/coding precision from 12-bit to 16-bit through the final S… |
+| 0056 | 2026-06-16 | @abipalli | 573376 | -165 (new record) | +17.11% | `6491617` | [0056](history/entries/0056--abipalli.md) | Size context tables to input length (recover the CI-blocked table-growth win) Th… |
 
-**Current record: 573541** (@10d9e, entry 0055)
+**Current record: 573376** (@abipalli, entry 0056)
 
 Ledger updates are **CI-only** — see [`.github/workflows/scorekeeper.yml`](.github/workflows/scorekeeper.yml).
