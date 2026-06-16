@@ -8,7 +8,7 @@
 
 use super::tables::{build, squash_d};
 
-const NCTX: usize = 91; // orders + word/n-gram + sparse + 2D + record + indirect + run + nest + nibble + text shape/layout
+const NCTX: usize = 99; // orders + word/n-gram + sparse + 2D + record + indirect + run + nest + nibble + text shape/layout
 // Mixer input layout:
 //   [0 .. NCTX)            direct adaptive counters
 //   [SM_BASE .. SM_BASE+NCTX) bit-history StateMap predictions (one per context)
@@ -44,6 +44,25 @@ const RATE_FLOOR: i32 = 40;
 #[inline]
 fn hashk(h: u32, x: u32) -> u32 {
     h.wrapping_add(x).wrapping_add(1).wrapping_mul(2654435761)
+}
+
+/// Pack the letter/digit/space/other class (2 bits each) of the four bytes in
+/// `c4` into an 8-bit signature (0..255).
+#[inline]
+fn cls4(c4: u32) -> u32 {
+    let cl = |b: u32| -> u32 {
+        let b = b & 0xff;
+        if (b >= 97 && b <= 122) || (b >= 65 && b <= 90) {
+            1
+        } else if b >= 48 && b <= 57 {
+            2
+        } else if b == 32 || b == 9 || b == 10 || b == 13 {
+            3
+        } else {
+            0
+        }
+    };
+    cl(c4) | (cl(c4 >> 8) << 2) | (cl(c4 >> 16) << 4) | (cl(c4 >> 24) << 6)
 }
 
 /// Nonstationary bit-history state transition. The state byte packs two bounded
@@ -271,6 +290,14 @@ pub struct Cm {
     follow4: Vec<u32>, // [FSIZE] hashed: bytes that followed each order-4 ctx
     follow5: Vec<u32>, // [FSIZE] hashed: bytes that followed each order-5 ctx
     follow6: Vec<u32>, // [FSIZE] hashed: bytes that followed each order-6 ctx
+    followhn: Vec<u32>, // [FSIZE] hashed: bytes that followed each high-nibble ctx
+    followd: Vec<u32>, // [FSIZE] hashed: bytes that followed each byte-delta ctx
+    followc: Vec<u32>, // [256] bytes that followed each char-class ctx
+    followln: Vec<u32>, // [FSIZE] hashed: bytes that followed each low-nibble ctx
+    followg: Vec<u32>, // [65536] bytes that followed each gap-bigram ctx
+    follows2: Vec<u32>, // [65536] bytes that followed each stride-2 ctx
+    follows3: Vec<u32>, // [65536] bytes that followed each stride-3 ctx
+    followg2: Vec<u32>, // [65536] bytes that followed each wide-gap ctx
     followw: Vec<u32>, // [65536] hashed: bytes that followed each word prefix
 }
 
@@ -289,6 +316,13 @@ impl Cm {
         // ~32 MB at zero cost to compression.
         let mut tb = [TBITS; NCTX];
         tb[0] = 9;
+        // The lower-order indirect-on-transform context models (slots 94..=98:
+        // low-nibble, gap, stride-2/3, wide-gap) are low-collision, so a smaller
+        // 2^22 table is nearly lossless (cost ~26 bytes) and keeps the model
+        // bank's committed memory within the CI runner's budget.
+        for i in 94..=98 {
+            tb[i] = 22;
+        }
         let mut tmask = [0u32; NCTX];
         for i in 0..NCTX {
             tmask[i] = (1u32 << tb[i]) - 1;
@@ -444,6 +478,14 @@ impl Cm {
             follow4: vec![0u32; FSIZE],
             follow5: vec![0u32; FSIZE],
             follow6: vec![0u32; FSIZE],
+            followhn: vec![0u32; FSIZE],
+            followd: vec![0u32; FSIZE],
+            followc: vec![0u32; 256],
+            followln: vec![0u32; FSIZE],
+            followg: vec![0u32; 65536],
+            follows2: vec![0u32; 65536],
+            follows3: vec![0u32; 65536],
+            followg2: vec![0u32; 65536],
             followw: vec![0u32; 65536],
         }
     }
@@ -1023,6 +1065,57 @@ impl Cm {
         } else {
             self.ctxhash[90] = 0;
         }
+        // High-nibble indirect: the opcode-class pattern (high nibble of the last
+        // four bytes) combined with the recent history of bytes that followed it.
+        // Merges the high-nibble and indirect families to capture "what operand
+        // byte usually follows this instruction-class pattern" in executables.
+        let hnm = (c4 & 0xf0f0_f0f0).wrapping_mul(0x9e37_79b1);
+        let khn = (hnm >> (32 - FBITS)) as usize;
+        self.ctxhash[91] = hashk(0x7C00, hnm ^ self.followhn[khn].wrapping_mul(0xc2b2_ae35));
+        // Byte-delta indirect: the consecutive-difference pattern combined with
+        // the recent history of bytes that followed it (numeric/tabular regimes).
+        let dm = (d1 | (d2 << 8) | (d3 << 16)).wrapping_mul(0x85eb_ca6b);
+        let kd = (dm >> (32 - FBITS)) as usize;
+        self.ctxhash[92] = hashk(0x7D00, dm ^ self.followd[kd].wrapping_mul(0x27d4_eb2f));
+        // Char-class indirect: the letter/digit/space/other pattern of the last
+        // four bytes combined with the bytes that have followed it (text regimes).
+        let cck = cls4(c4);
+        self.ctxhash[93] = hashk(0x7E00, cck ^ self.followc[cck as usize].wrapping_mul(0x9e37_79b1));
+        // Low-nibble indirect: the low nibbles of the last four bytes (operand /
+        // register pattern in code) combined with the bytes that followed it.
+        let lnm = (c4 & 0x0f0f_0f0f).wrapping_mul(0xc2b2_ae35);
+        let kln = (lnm >> (32 - FBITS)) as usize;
+        self.ctxhash[94] = hashk(0x7F00, lnm ^ self.followln[kln].wrapping_mul(0x85eb_ca6b));
+        // Gap-bigram indirect: the (last byte, byte three back) sparse pair plus
+        // the bytes that followed it.
+        let gk = if self.pos >= 3 {
+            (c4 & 0xff) | ((self.b(self.pos - 3) as u32) << 8)
+        } else {
+            c4 & 0xffff
+        };
+        self.ctxhash[95] = hashk(0x8000, gk ^ self.followg[gk as usize].wrapping_mul(0x27d4_eb2f));
+        // Stride-2 indirect: the (pos-2, pos-4) interleaved pair plus its history.
+        let sk = if self.pos >= 4 {
+            (self.b(self.pos - 2) as u32) | ((self.b(self.pos - 4) as u32) << 8)
+        } else {
+            c4 & 0xffff
+        };
+        self.ctxhash[96] = hashk(0x8100, sk ^ self.follows2[sk as usize].wrapping_mul(0x9e37_79b1));
+        // Stride-3 indirect: the (pos-3, pos-6) pair plus its follow history.
+        let s3k = if self.pos >= 6 {
+            (self.b(self.pos - 3) as u32) | ((self.b(self.pos - 6) as u32) << 8)
+        } else {
+            c4 & 0xffff
+        };
+        self.ctxhash[97] = hashk(0x8200, s3k ^ self.follows3[s3k as usize].wrapping_mul(0x85eb_ca6b));
+        // Wide-gap indirect: the (last byte, byte five back) sparse pair plus its
+        // follow history (longer-range sparse structure).
+        let g2k = if self.pos >= 5 {
+            (c4 & 0xff) | ((self.b(self.pos - 5) as u32) << 8)
+        } else {
+            c4 & 0xffff
+        };
+        self.ctxhash[98] = hashk(0x8300, g2k ^ self.followg2[g2k as usize].wrapping_mul(0xc2b2_ae35));
     }
 
     #[inline]
@@ -1490,6 +1583,46 @@ impl Cm {
                     ^ (self.b(self.pos - 6) as u32).wrapping_mul(0x27d4_eb2f);
                 let k6 = (m6 >> (32 - FBITS)) as usize;
                 self.follow6[k6] = (self.follow6[k6] << 8) | byte as u32;
+            }
+            {
+                let hnm = (self.c4 & 0xf0f0_f0f0).wrapping_mul(0x9e37_79b1);
+                let khn = (hnm >> (32 - FBITS)) as usize;
+                self.followhn[khn] = (self.followhn[khn] << 8) | byte as u32;
+                let dd1 = (self.c4 & 0xff).wrapping_sub((self.c4 >> 8) & 0xff) & 0xff;
+                let dd2 = ((self.c4 >> 8) & 0xff).wrapping_sub((self.c4 >> 16) & 0xff) & 0xff;
+                let dd3 = ((self.c4 >> 16) & 0xff).wrapping_sub((self.c4 >> 24) & 0xff) & 0xff;
+                let dm = (dd1 | (dd2 << 8) | (dd3 << 16)).wrapping_mul(0x85eb_ca6b);
+                let kd = (dm >> (32 - FBITS)) as usize;
+                self.followd[kd] = (self.followd[kd] << 8) | byte as u32;
+                let cck = cls4(self.c4) as usize;
+                self.followc[cck] = (self.followc[cck] << 8) | byte as u32;
+                let lnm = (self.c4 & 0x0f0f_0f0f).wrapping_mul(0xc2b2_ae35);
+                let kln = (lnm >> (32 - FBITS)) as usize;
+                self.followln[kln] = (self.followln[kln] << 8) | byte as u32;
+                let gk = if self.pos >= 3 {
+                    (self.c4 & 0xff) | ((self.b(self.pos - 3) as u32) << 8)
+                } else {
+                    self.c4 & 0xffff
+                } as usize;
+                self.followg[gk] = (self.followg[gk] << 8) | byte as u32;
+                let sk = if self.pos >= 4 {
+                    (self.b(self.pos - 2) as u32) | ((self.b(self.pos - 4) as u32) << 8)
+                } else {
+                    self.c4 & 0xffff
+                } as usize;
+                self.follows2[sk] = (self.follows2[sk] << 8) | byte as u32;
+                let s3k = if self.pos >= 6 {
+                    (self.b(self.pos - 3) as u32) | ((self.b(self.pos - 6) as u32) << 8)
+                } else {
+                    self.c4 & 0xffff
+                } as usize;
+                self.follows3[s3k] = (self.follows3[s3k] << 8) | byte as u32;
+                let g2k = if self.pos >= 5 {
+                    (self.c4 & 0xff) | ((self.b(self.pos - 5) as u32) << 8)
+                } else {
+                    self.c4 & 0xffff
+                } as usize;
+                self.followg2[g2k] = (self.followg2[g2k] << 8) | byte as u32;
             }
             let bp = (self.pos & self.bufmask) as usize;
             self.buf[bp] = byte;
