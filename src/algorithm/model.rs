@@ -18,7 +18,7 @@ const SM_BASE: usize = NCTX;
 const MM_BASE: usize = 2 * NCTX;
 const DMC_IN: usize = 2 * NCTX + 6; // DMC variable-order prediction (one extra input)
 const NINPUT: usize = 2 * NCTX + 7;
-const TBITS: u32 = 23; // default per-model context-table size (2^TBITS slots)
+const TBITS: u32 = 20; // default per-model context-table size (2^TBITS slots)
 const MIXCTX: usize = 16384;
 const NL1: usize = 27; // number of layer-1 specialist mixers
 const L1LR: i32 = 8; // layer-1 specialist learning rate
@@ -375,7 +375,7 @@ impl Cm {
         tb[0] = 9;
         for i in 0..NCTX {
             if assoc[i] {
-                tb[i] = 22 + grow; // 2^22 slots = 2^19 buckets x 8 ways (×2 for large inputs)
+                tb[i] = 20 + grow; // aggressive shrink for speed+memory
             }
         }
         let mut tmask = [0u32; NCTX];
