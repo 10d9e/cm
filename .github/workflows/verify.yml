@@ -49,6 +49,27 @@ jobs:
             echo "Do not commit \`RESULTS.md\` or \`history/entries/\`. Scorekeeper records the ledger after merge."
           } >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Complexity metric (OPS, non-gating)
+        # Informational only — never fails the build. Builds the metrics binary
+        # (debug: fast compile, and OPS is optimization-independent) and prints
+        # the deterministic work-unit count on the fixed tiny/ corpus.
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          cargo build --features metrics --bin cm
+          ./target/debug/cm metrics tiny | tee /tmp/ops.out
+          {
+            echo "## Complexity metric (informational, non-gating)"
+            echo
+            echo '```'
+            cat /tmp/ops.out
+            echo '```'
+            echo
+            echo "OPS = deterministic hot-path work units (mixer terms + context-model"
+            echo "accesses) on the fixed \`tiny/\` corpus. Reproducible on any machine;"
+            echo "tracks compute/complexity, not cache/memory (so not a wall-time predictor)."
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Comment score on PR
         # Best-effort only. Fork PRs run with a read-only GITHUB_TOKEN (GitHub
         # forces this regardless of the `pull-requests: write` declared above),
@@ -79,10 +100,15 @@ jobs:
             else delta=" (Δ +${d} vs record ${prev})"
             fi
           fi
+          ops="$(grep '^OPS:' /tmp/ops.out 2>/dev/null || true)"
           {
             echo "## CI verification passed ✅"
             echo
             echo "\`${score}\`${delta}"
+            if [[ -n "$ops" ]]; then
+              echo
+              echo "\`${ops}\` — deterministic complexity on the fixed \`tiny/\` corpus (non-gating)."
+            fi
             echo
             echo "This score was computed on GitHub Actions — local claims are not trusted."
             echo
