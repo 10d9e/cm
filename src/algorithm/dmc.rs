@@ -65,7 +65,8 @@ impl Dmc {
         let mut p = (((2 * c1 + 1) * 2048) / (c0 + c1 + 1)) as i32;
         if p < 1 { p = 1; }
         if p > 4095 { p = 4095; }
-        stretch[p as usize]
+        // p is clamped to [1,4095], a valid index into the 4096-entry table.
+        unsafe { *stretch.get_unchecked(p as usize) }
     }
 
     /// Observe `bit`: optionally clone the target, bump the edge count, advance.

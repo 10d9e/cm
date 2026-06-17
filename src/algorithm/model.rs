@@ -139,12 +139,15 @@ impl Apm {
     /// predictions are not re-quantized to the 12-bit 1/4096 grid.
     #[inline]
     fn apply16(&mut self, stretch16: &[i32], ctx: usize, p: i32) -> i32 {
-        let s = stretch16[p as usize] + 2048; // 0..4095
+        // p is clamped to [1,65534] before every call (valid index into the
+        // 65536-entry table). j = s>>7 is in [0,31] and ctx < n at every call site,
+        // so idx and idx+1 stay within t (len n*APM_S). Skip the bounds checks.
+        let s = unsafe { *stretch16.get_unchecked(p as usize) } + 2048; // 0..4095
         let w = s & 127;
         let j = (s >> 7) as usize;
         self.idx = ctx * APM_S + j;
-        let lo = self.t[self.idx] as i32;
-        let hi = self.t[self.idx + 1] as i32;
+        let lo = unsafe { *self.t.get_unchecked(self.idx) } as i32;
+        let hi = unsafe { *self.t.get_unchecked(self.idx + 1) } as i32;
         let mut pp = (lo * (128 - w) + hi * w) >> 7;
         if pp < 1 {
             pp = 1;
@@ -158,10 +161,13 @@ impl Apm {
     #[inline]
     fn update(&mut self, bit: i32) {
         let g = (bit << 16) + (bit << 4) - bit - bit;
-        let a = self.t[self.idx] as i32;
-        let b = self.t[self.idx + 1] as i32;
-        self.t[self.idx] = (a + ((g - a) >> 7)) as u16;
-        self.t[self.idx + 1] = (b + ((g - b) >> 7)) as u16;
+        // idx/idx+1 were set to in-range values by the matching apply16 call.
+        let a = unsafe { *self.t.get_unchecked(self.idx) } as i32;
+        let b = unsafe { *self.t.get_unchecked(self.idx + 1) } as i32;
+        unsafe {
+            *self.t.get_unchecked_mut(self.idx) = (a + ((g - a) >> 7)) as u16;
+            *self.t.get_unchecked_mut(self.idx + 1) = (b + ((g - b) >> 7)) as u16;
+        }
     }
 }
 
@@ -1455,7 +1461,7 @@ impl Cm {
                     self.matchlen
                 };
                 self.mm_idx = ((li << 1) | expected_bit) as usize;
-                self.mix_in[MM_BASE] = self.stretch[self.mm_sm[self.mm_idx] as usize];
+                self.mix_in[MM_BASE] = unsafe { *self.stretch.get_unchecked(*self.mm_sm.get_unchecked(self.mm_idx) as usize) };
                 self.mm_used = true;
             } else {
                 self.matchlen = 0;
@@ -1473,7 +1479,7 @@ impl Cm {
                     self.matchlen2
                 };
                 self.mm_idx2 = ((li << 1) | expected_bit) as usize;
-                self.mix_in[MM_BASE + 1] = self.stretch[self.mm_sm2[self.mm_idx2] as usize];
+                self.mix_in[MM_BASE + 1] = unsafe { *self.stretch.get_unchecked(*self.mm_sm2.get_unchecked(self.mm_idx2) as usize) };
                 self.mm_used2 = true;
             } else {
                 self.matchlen2 = 0;
@@ -1491,7 +1497,7 @@ impl Cm {
                     self.matchlen3
                 };
                 self.mm_idx3 = ((li << 1) | expected_bit) as usize;
-                self.mix_in[MM_BASE + 2] = self.stretch[self.mm_sm3[self.mm_idx3] as usize];
+                self.mix_in[MM_BASE + 2] = unsafe { *self.stretch.get_unchecked(*self.mm_sm3.get_unchecked(self.mm_idx3) as usize) };
                 self.mm_used3 = true;
             } else {
                 self.matchlen3 = 0;
@@ -1509,7 +1515,7 @@ impl Cm {
                     self.matchlen4
                 };
                 self.mm_idx4 = ((li << 1) | expected_bit) as usize;
-                self.mix_in[MM_BASE + 3] = self.stretch[self.mm_sm4[self.mm_idx4] as usize];
+                self.mix_in[MM_BASE + 3] = unsafe { *self.stretch.get_unchecked(*self.mm_sm4.get_unchecked(self.mm_idx4) as usize) };
                 self.mm_used4 = true;
             } else {
                 self.matchlen4 = 0;
@@ -1527,7 +1533,7 @@ impl Cm {
                     self.matchlen5
                 };
                 self.mm_idx5 = ((li << 1) | expected_bit) as usize;
-                self.mix_in[MM_BASE + 4] = self.stretch[self.mm_sm5[self.mm_idx5] as usize];
+                self.mix_in[MM_BASE + 4] = unsafe { *self.stretch.get_unchecked(*self.mm_sm5.get_unchecked(self.mm_idx5) as usize) };
                 self.mm_used5 = true;
             } else {
                 self.matchlen5 = 0;
@@ -1545,7 +1551,7 @@ impl Cm {
                     self.matchlen6
                 };
                 self.mm_idx6 = ((li << 1) | expected_bit) as usize;
-                self.mix_in[MM_BASE + 5] = self.stretch[self.mm_sm6[self.mm_idx6] as usize];
+                self.mix_in[MM_BASE + 5] = unsafe { *self.stretch.get_unchecked(*self.mm_sm6.get_unchecked(self.mm_idx6) as usize) };
                 self.mm_used6 = true;
             } else {
                 self.matchlen6 = 0;
