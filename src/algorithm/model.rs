@@ -178,7 +178,6 @@ impl Apm {
 /// inputs to produce a logit, and trains that row online toward the observed
 /// bit. Used both as the layer-1 specialists and the layer-2 combiner.
 struct Mixer {
-    n: usize,
     nctx: usize,
     w: Vec<i32>,
     ctx: usize,
@@ -189,7 +188,6 @@ struct Mixer {
 impl Mixer {
     fn new(n: usize, nctx: usize, lr: i32) -> Self {
         Mixer {
-            n,
             nctx,
             w: vec![(1 << 16) / n as i32; n * nctx],
             ctx: 0,
@@ -198,56 +196,10 @@ impl Mixer {
         }
     }
 
-    /// Mix `inputs` under the given context; returns the clamped logit (the
-    /// stretched prediction) and caches the squashed probability for `update`.
-    #[inline]
-    fn mix(&mut self, inputs: &[i64], squash: &[i32], ctx: usize) -> i32 {
-        let ctx = ctx & (self.nctx - 1);
-        self.ctx = ctx;
-        let base = ctx * self.n;
-        // Slice both operands to exactly `n` so the inner loop is bounds-check-free.
-        // base+n = (ctx+1)*n <= nctx*n = w.len() (ctx < nctx after the mask) and
-        // inputs.len() == n at every call site, so both slices are always valid;
-        // the i64 accumulation order is unchanged, so the result is identical.
-        // Inputs are pre-widened to i64 once per bit (the same input vector feeds
-        // every mixer), so the per-element `as i64` extend is gone from this loop.
-        let w = unsafe { self.w.get_unchecked(base..base + self.n) };
-        let inp = unsafe { inputs.get_unchecked(..self.n) };
-        let mut dot: i64 = 0;
-        for (&wi, &xi) in w.iter().zip(inp) {
-            dot += wi as i64 * xi;
-        }
-        let mut d = (dot >> 16) as i32;
-        if d > 2047 {
-            d = 2047;
-        }
-        if d < -2047 {
-            d = -2047;
-        }
-        let mut p = squash_d(squash, d);
-        if p < 1 {
-            p = 1;
-        }
-        if p > 4094 {
-            p = 4094;
-        }
-        self.pr = p;
-        d
-    }
-
-    /// Train the selected row toward `bit` using this mixer's own prediction.
-    #[inline]
-    fn update(&mut self, bit: i32, inputs: &[i32]) {
-        let err = (bit << 12) - self.pr;
-        let base = self.ctx * self.n;
-        // Bounds-check-free element-wise update (see `mix`): same valid slices.
-        let w = unsafe { self.w.get_unchecked_mut(base..base + self.n) };
-        let inp = unsafe { inputs.get_unchecked(..self.n) };
-        for (wi, &xi) in w.iter_mut().zip(inp) {
-            let delta = (xi * err * self.lr) >> 16;
-            *wi = wi.wrapping_add(delta);
-        }
-    }
+    // The per-mixer mix()/update() methods were replaced by the fused layer-1 and
+    // layer-2 passes in predict()/update() (all mixers share one input vector, so
+    // it is loaded once instead of per mixer). Mixer is now a plain weight/ctx/pr
+    // holder; `new` and the fields are used directly by the fused loops.
 }
 
 pub struct Cm {
@@ -1850,47 +1802,83 @@ impl Cm {
         for k in 0..NL1 {
             self.l2_in64[k] = self.l2_in[k] as i64;
         }
-        let d2a = self.l2.mix(&self.l2_in64, &self.squash, self.c1 as usize);
-        let d2b = self.l2b.mix(&self.l2_in64, &self.squash, self.c0 as usize);
+        // Fused layer-2 dot products: the 10 combiners all dot the same 27-wide
+        // logit vector, so load each input once and accumulate into all 10 dots.
         let l2cctx = ((self.matchlen.min(15) as usize) << 2)
             | (if self.matchlen3 > 0 { 2 } else { 0 })
             | (if self.matchlen4 > 0 { 1 } else { 0 });
-        let d2c = self.l2c.mix(&self.l2_in64, &self.squash, l2cctx);
-        let d2d = self
-            .l2d
-            .mix(&self.l2_in64, &self.squash, ((self.c4 >> 8) & 0xff) as usize);
         let l2ectx = if self.wordhash != 0 {
             (self.wordhash.wrapping_mul(0x9e37_79b1) >> 24) as usize
         } else {
             self.c1 as usize
         };
-        let d2e = self.l2e.mix(&self.l2_in64, &self.squash, l2ectx);
         let l2fctx = ((self.c4 & 0xf0f0_f0f0).wrapping_mul(0x9e37_79b1) >> 24) as usize;
-        let d2f = self.l2f.mix(&self.l2_in64, &self.squash, l2fctx);
         let l2gctx = cls(self.c4)
             | (cls(self.c4 >> 8) << 2)
             | (cls(self.c4 >> 16) << 4)
             | (cls(self.c4 >> 24) << 6);
-        let d2g = self.l2g.mix(&self.l2_in64, &self.squash, l2gctx);
         let l2hctx = if self.nest_depth > 0 {
             (self.nest_stack[self.nest_depth - 1] as usize) | ((self.nest_depth & 3) << 8)
         } else {
             0
         };
-        let d2h = self.l2h.mix(&self.l2_in64, &self.squash, l2hctx);
         let l2ictx = (self.above_byte as usize) | ((self.c1 as usize & 1) << 9);
-        let d2i = self.l2i.mix(&self.l2_in64, &self.squash, l2ictx);
-        // numeric-regime combiner: keyed on the byte-delta pattern of the last
-        // three differences (captures gradient/tabular regimes).
+        // numeric-regime combiner: keyed on the byte-delta pattern of the last three.
         let l2jctx = (dsmsel & 0xff) | ((dsign(self.c4 >> 8, self.c4 >> 16)) << 6);
-        let d2j = self.l2j.mix(&self.l2_in64, &self.squash, l2jctx & 0xff);
+        self.l2.ctx = (self.c1 as usize) & (self.l2.nctx - 1);
+        self.l2b.ctx = (self.c0 as usize) & (self.l2b.nctx - 1);
+        self.l2c.ctx = l2cctx & (self.l2c.nctx - 1);
+        self.l2d.ctx = (((self.c4 >> 8) & 0xff) as usize) & (self.l2d.nctx - 1);
+        self.l2e.ctx = l2ectx & (self.l2e.nctx - 1);
+        self.l2f.ctx = l2fctx & (self.l2f.nctx - 1);
+        self.l2g.ctx = l2gctx & (self.l2g.nctx - 1);
+        self.l2h.ctx = l2hctx & (self.l2h.nctx - 1);
+        self.l2i.ctx = l2ictx & (self.l2i.nctx - 1);
+        self.l2j.ctx = (l2jctx & 0xff) & (self.l2j.nctx - 1);
+        let mut dd = [0i64; 10];
+        {
+            let rows: [&[i32]; 10] = [
+                { let b = self.l2.ctx * NL1; unsafe { self.l2.w.get_unchecked(b..b + NL1) } },
+                { let b = self.l2b.ctx * NL1; unsafe { self.l2b.w.get_unchecked(b..b + NL1) } },
+                { let b = self.l2c.ctx * NL1; unsafe { self.l2c.w.get_unchecked(b..b + NL1) } },
+                { let b = self.l2d.ctx * NL1; unsafe { self.l2d.w.get_unchecked(b..b + NL1) } },
+                { let b = self.l2e.ctx * NL1; unsafe { self.l2e.w.get_unchecked(b..b + NL1) } },
+                { let b = self.l2f.ctx * NL1; unsafe { self.l2f.w.get_unchecked(b..b + NL1) } },
+                { let b = self.l2g.ctx * NL1; unsafe { self.l2g.w.get_unchecked(b..b + NL1) } },
+                { let b = self.l2h.ctx * NL1; unsafe { self.l2h.w.get_unchecked(b..b + NL1) } },
+                { let b = self.l2i.ctx * NL1; unsafe { self.l2i.w.get_unchecked(b..b + NL1) } },
+                { let b = self.l2j.ctx * NL1; unsafe { self.l2j.w.get_unchecked(b..b + NL1) } },
+            ];
+            for i in 0..NL1 {
+                let xi = self.l2_in64[i];
+                for j in 0..10 {
+                    dd[j] += unsafe { *rows[j].get_unchecked(i) } as i64 * xi;
+                }
+            }
+        }
+        let mut dsum = 0i32;
+        let mut dv = [0i32; 10];
+        for j in 0..10 {
+            let mut v = (dd[j] >> 16) as i32;
+            if v > 2047 { v = 2047; }
+            if v < -2047 { v = -2047; }
+            dv[j] = v;
+            dsum += v;
+        }
+        let mut prs = [0i32; 10];
+        for j in 0..10 {
+            let mut pp = squash_d(&self.squash, dv[j]);
+            if pp < 1 { pp = 1; }
+            if pp > 4094 { pp = 4094; }
+            prs[j] = pp;
+        }
+        self.l2.pr = prs[0]; self.l2b.pr = prs[1]; self.l2c.pr = prs[2]; self.l2d.pr = prs[3];
+        self.l2e.pr = prs[4]; self.l2f.pr = prs[5]; self.l2g.pr = prs[6]; self.l2h.pr = prs[7];
+        self.l2i.pr = prs[8]; self.l2j.pr = prs[9];
         // Squash the combined logit straight to 16-bit and run the whole SSE/APM
         // chain at 16-bit precision (the calibration tables are ~16-bit), so no
         // stage re-quantizes the probability to the 12-bit 1/4096 grid.
-        let mut p = squash16_d(
-            &self.squash16,
-            (d2a + d2b + d2c + d2d + d2e + d2f + d2g + d2h + d2i + d2j) / 10,
-        );
+        let mut p = squash16_d(&self.squash16, dsum / 10);
         if p < 1 {
             p = 1;
         }
@@ -2005,16 +1993,35 @@ impl Cm {
                 }
             }
         }
-        self.l2.update(bit, &self.l2_in);
-        self.l2b.update(bit, &self.l2_in);
-        self.l2c.update(bit, &self.l2_in);
-        self.l2d.update(bit, &self.l2_in);
-        self.l2e.update(bit, &self.l2_in);
-        self.l2f.update(bit, &self.l2_in);
-        self.l2g.update(bit, &self.l2_in);
-        self.l2h.update(bit, &self.l2_in);
-        self.l2i.update(bit, &self.l2_in);
-        self.l2j.update(bit, &self.l2_in);
+        // Fused layer-2 weight update (same idea as layer-1): the 10 combiners all
+        // train on the same 27-wide logit vector, so load each l2_in[i] once and
+        // apply it to all 10 weight rows in one pass. Identical per-row arithmetic.
+        {
+            let mut errlr = [0i32; 10];
+            let mut rowp: [*mut i32; 10] = [core::ptr::null_mut::<i32>(); 10];
+            {
+                let ms: [&mut Mixer; 10] = [
+                    &mut self.l2, &mut self.l2b, &mut self.l2c, &mut self.l2d, &mut self.l2e,
+                    &mut self.l2f, &mut self.l2g, &mut self.l2h, &mut self.l2i, &mut self.l2j,
+                ];
+                for (j, m) in ms.into_iter().enumerate() {
+                    errlr[j] = ((bit << 12) - m.pr) * m.lr;
+                    let base = m.ctx * NL1;
+                    // SAFETY: base + NL1 <= w.len(); the 10 rows are in distinct,
+                    // non-overlapping, never-resized weight buffers.
+                    rowp[j] = unsafe { m.w.as_mut_ptr().add(base) };
+                }
+            }
+            for i in 0..NL1 {
+                let xi = self.l2_in[i];
+                for j in 0..10 {
+                    unsafe {
+                        let p = rowp[j].add(i);
+                        *p = (*p).wrapping_add((xi * errlr[j]) >> 16);
+                    }
+                }
+            }
+        }
         for i in 0..NCTX {
             let ix = self.idx[i];
             let s = self.sm_idx[i];
