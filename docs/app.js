@@ -34,6 +34,15 @@ function fmt(n) {
   return n == null ? "—" : n.toLocaleString("en-US");
 }
 
+// WORK = deterministic wasm-fuel complexity (executed operators). Large integers,
+// so render compactly (G/M). Older entries predate the metric and show "—".
+function fmtWork(n) {
+  if (n == null) return "—";
+  if (n >= 1e9) return (n / 1e9).toFixed(2) + "G";
+  if (n >= 1e6) return (n / 1e6).toFixed(1) + "M";
+  return n.toLocaleString("en-US");
+}
+
 const BASELINE_COLORS = {
   zstd22: "rgba(255, 255, 255, 0.22)",
   xz9e: "rgba(255, 255, 255, 0.16)",
@@ -226,6 +235,7 @@ function renderGrid(data) {
         <td class="c-score">${fmt(e.score)}</td>
         <td class="c-delta"><span class="badge ${deltaClass}">${escapeHtml(compactDelta(e))}</span></td>
         <td class="c-zstd">${escapeHtml(e.vsZstd)}</td>
+        <td class="c-work" title="${e.work != null ? e.work + " wasm operators (deterministic, lower is faster)" : "not measured"}">${fmtWork(e.work)}</td>
         <td class="c-open"><span class="open-btn">View ↗</span></td>
       </tr>`;
     })
@@ -234,7 +244,7 @@ function renderGrid(data) {
   $("#grid").innerHTML = `
     <colgroup>
       <col class="w-id" /><col class="w-author" /><col class="w-model" /><col class="w-score" />
-      <col class="w-delta" /><col class="w-zstd" /><col class="w-open" />
+      <col class="w-delta" /><col class="w-zstd" /><col class="w-work" /><col class="w-open" />
     </colgroup>
     <thead>
       <tr>
@@ -244,6 +254,7 @@ function renderGrid(data) {
         <th class="c-score">SCORE</th>
         <th class="c-delta">Δ</th>
         <th class="c-zstd">vs zstd</th>
+        <th class="c-work" title="Deterministic complexity — wasm fuel (executed operators); lower is faster">WORK</th>
         <th class="c-open"></th>
       </tr>
     </thead>
@@ -327,6 +338,7 @@ function openDialog(e, repo) {
       <div class="d-metric"><span class="m-label">SCORE</span><span class="m-value">${fmt(e.score)}</span></div>
       <div class="d-metric"><span class="m-label">Δ vs record</span><span class="m-value"><span class="badge ${deltaClass}">${escapeHtml(e.delta)}</span></span></div>
       <div class="d-metric"><span class="m-label">vs zstd −22</span><span class="m-value">${escapeHtml(e.vsZstd)}</span></div>
+      ${e.work != null ? `<div class="d-metric"><span class="m-label">WORK</span><span class="m-value" title="deterministic wasm fuel — executed operators; lower is faster">${fmt(e.work)}</span></div>` : ""}
       <div class="d-metric"><span class="m-label">commit</span><span class="m-value"><a class="sha" href="${commitUrl}" target="_blank" rel="noopener">${escapeHtml(e.commit)}</a></span></div>
     </div>
 
