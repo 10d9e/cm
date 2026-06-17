@@ -86,6 +86,8 @@ pub struct Ctw {
     // (predict first), so these are fresh when update runs.
     spath: [Node; DEPTH + 1], // path node at each depth 0..=DEPTH
     ssib: [f64; DEPTH],       // sibling lw used at depth d (d in 0..DEPTH)
+    ln_half: f64,             // ln(0.5), computed once; reused for the KT update when n0==n1
+    ln2: f64,                 // ln(2), computed once; the value ln_add adds when its args are equal
 }
 
 impl Ctw {
@@ -95,6 +97,10 @@ impl Ctw {
             hist: 0,
             spath: [Node::empty(); DEPTH + 1],
             ssib: [0.0; DEPTH],
+            // Same value `0.5_f64.ln()` would yield in the hot loop, computed once.
+            ln_half: 0.5_f64.ln(),
+            // ln(2) == `1.0_f64.ln_1p()`, the value `ln_add(a, a)` adds; computed once.
+            ln2: 1.0_f64.ln_1p(),
         }
     }
 
@@ -134,8 +140,12 @@ impl Ctw {
             self.spath[d] = nd;
             self.ssib[d] = sib.lw;
             let lpc = onpath.lw + sib.lw; // ln Pw(s0)Pw(s1)
-            // alpha = Pe / (Pe + Pc) = 1 / (1 + e^{lpc - lpe})
-            let alpha = 1.0 / (1.0 + (lpc - nd.lpe).exp());
+            // alpha = Pe / (Pe + Pc) = 1 / (1 + e^{lpc - lpe}). When the exponent is
+            // exactly 0 (the common case of an empty node with empty children, e.g.
+            // the deep unseen tail) e^0 == 1, so alpha is exactly 0.5 — skip the
+            // expensive transcendental. Bit-identical to the full expression.
+            let arg = lpc - nd.lpe;
+            let alpha = if arg == 0.0 { 0.5 } else { 1.0 / (1.0 + arg.exp()) };
             pred = alpha * nd.kt_p1() + (1.0 - alpha) * pred;
             onpath = nd; // becomes the on-path child for the next, shallower depth
         }
@@ -158,10 +168,17 @@ impl Ctw {
             // Reuse the node `predict` already read for this depth (same history,
             // no writes since) instead of re-fetching it from the map.
             let mut nd = self.spath[d];
-            // KT probability of the observed bit, then count it.
-            let denom = nd.n[0] as f64 + nd.n[1] as f64 + 1.0;
-            let p_obs = (nd.n[b] as f64 + 0.5) / denom;
-            nd.lpe += p_obs.ln();
+            // KT probability of the observed bit, then count it. When the two counts
+            // are equal (always so on a node's first touch, n0==n1==0) the KT
+            // probability is exactly (k+0.5)/(2k+1) = 0.5 for either bit, so its log
+            // is the precomputed ln(0.5) — skip the transcendental. Bit-identical.
+            if nd.n[0] == nd.n[1] {
+                nd.lpe += self.ln_half;
+            } else {
+                let denom = nd.n[0] as f64 + nd.n[1] as f64 + 1.0;
+                let p_obs = (nd.n[b] as f64 + 0.5) / denom;
+                nd.lpe += p_obs.ln();
+            }
             nd.n[b] += 1;
             if d == DEPTH {
                 nd.lw = nd.lpe; // leaf
@@ -170,7 +187,12 @@ impl Ctw {
                 // sibling (off-path child) lw, unchanged this step — also stashed
                 // by predict.
                 let sib_lw = self.ssib[d];
-                nd.lw = ln_add(LN_HALF + nd.lpe, LN_HALF + child_lw + sib_lw);
+                let a = LN_HALF + nd.lpe;
+                let b = LN_HALF + child_lw + sib_lw;
+                // ln_add(a, b) with a == b reduces to a + ln(2) (its `exp(0)` term is
+                // exactly 1) — common for the deep first-touch chain, where both sides
+                // are 2·ln(0.5). Skip the exp/ln_1p; bit-identical to the full call.
+                nd.lw = if a == b { a + self.ln2 } else { ln_add(a, b) };
                 child_lw = nd.lw;
             }
             let k = Self::key(d, ctx);
