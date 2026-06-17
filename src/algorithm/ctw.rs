@@ -18,6 +18,33 @@
 //! down-weightable mixer input (the mixer ignores it if it does not help).
 
 use std::collections::HashMap;
+use std::hash::{BuildHasherDefault, Hasher};
+
+/// Pass-through hasher for the already-well-mixed `u64` node keys. `key()` below
+/// applies a strong avalanche mix, so re-hashing with the default SipHash is pure
+/// wasted work; this hasher just returns the key. HashMap semantics are unchanged
+/// (lookups still match by exact key), so predictions are byte-for-byte identical
+/// — only far cheaper. Keys are always written via `write_u64`.
+#[derive(Default)]
+struct IdHasher(u64);
+impl Hasher for IdHasher {
+    #[inline]
+    fn finish(&self) -> u64 {
+        self.0
+    }
+    #[inline]
+    fn write_u64(&mut self, n: u64) {
+        self.0 = n;
+    }
+    #[inline]
+    fn write(&mut self, bytes: &[u8]) {
+        // Not used for u64 keys; provide a correct fallback just in case.
+        for &b in bytes {
+            self.0 = self.0.rotate_left(8) ^ b as u64;
+        }
+    }
+}
+type NodeMap = HashMap<u64, Node, BuildHasherDefault<IdHasher>>;
 
 const DEPTH: usize = 32; // context depth in bits (4 bytes)
 const MAXNODES: usize = 1 << 24; // node-store cap (~0.8 GB); freeze growth when hit
@@ -51,13 +78,16 @@ fn ln_add(a: f64, b: f64) -> f64 {
 }
 
 pub struct Ctw {
-    nodes: HashMap<u64, Node>,
+    nodes: NodeMap,
     hist: u64, // bit history, most-recent bit in bit 0
 }
 
 impl Ctw {
     pub fn new() -> Self {
-        Ctw { nodes: HashMap::with_capacity(1 << 20), hist: 0 }
+        Ctw {
+            nodes: NodeMap::with_capacity_and_hasher(1 << 20, BuildHasherDefault::default()),
+            hist: 0,
+        }
     }
 
     #[inline]
