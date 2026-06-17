@@ -419,7 +419,7 @@ impl Cm {
         tb[0] = 9;
         for i in 0..NCTX {
             if assoc[i] {
-                tb[i] = if big { 24 } else { 20 };
+                tb[i] = if big { 23 } else { 20 };
             }
         }
         let mut tmask = [0u32; NCTX];
