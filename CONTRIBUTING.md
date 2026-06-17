@@ -61,6 +61,12 @@ still auto-merges like any other passing submission — Scorekeeper marks the
 entry as **record**. Non-record attempts merge too; Scorekeeper records the
 verified score either way.
 
+Ranking is **SCORE first, then WORK** (the deterministic complexity metric).
+WORK breaks **exact** byte-score ties only: if your SCORE exactly equals the
+current record's, the lower-WORK submission takes the record. WORK never
+overrides a compression win, not even by one byte — fewer bytes always wins
+first. (A submission with no WORK measurement cannot win a tie.)
+
 ## How merges are gated
 
 `main` is protected by a repository ruleset: every change must go through a PR

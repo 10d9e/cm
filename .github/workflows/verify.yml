@@ -89,21 +89,37 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           score="$(grep '^SCORE:' /tmp/eval.out || echo 'SCORE: unknown')"
-          prev="$(awk -F'|' '
+          # Incumbent record = lowest-SCORE row; capture its entry id too so an
+          # exact byte tie can be broken by WORK (matches the scorekeeper rule:
+          # SCORE asc, then WORK asc, with byte score dominant).
+          read -r prev prev_id < <(awk -F'|' '
             /^\| [0-9]/ {
-              gsub(/ /,"",$5)
+              id=$2; gsub(/ /,"",id); gsub(/ /,"",$5)
               if ($5 ~ /^[0-9]+$/) {
-                if (best=="" || $5+0 < best+0) best=$5
+                if (best=="" || $5+0 < best+0) { best=$5; bid=id }
               }
             }
-            END { print best }
-          ' RESULTS.md)"
+            END { print best, bid }
+          ' RESULTS.md)
+          cur_work="$(sed -n 's/^WORK: \([0-9][0-9]*\).*/\1/p' /tmp/fuel.out 2>/dev/null | tail -1 || true)"
           delta=""
           if [[ -n "$prev" && "$score" =~ SCORE:\ ([0-9]+) ]]; then
             cur="${BASH_REMATCH[1]}"
             d=$((cur - prev))
             if (( d < 0 )); then delta=" (**new record**, Δ ${d})"
-            elif (( d == 0 )); then delta=" (tie)"
+            elif (( d == 0 )); then
+              # Exact byte tie: lower WORK takes the record. Missing incumbent
+              # WORK counts as +infinity; a missing PR WORK cannot claim the win.
+              prev_work=""
+              if [[ -n "$prev_id" ]]; then
+                pe="$(ls history/entries/${prev_id}*.md 2>/dev/null | head -1 || true)"
+                [[ -n "$pe" ]] && prev_work="$(sed -n 's/^| WORK | \([0-9][0-9]*\) |.*/\1/p' "$pe" | tail -1)"
+              fi
+              if [[ -n "$cur_work" ]] && { [[ -z "$prev_work" ]] || (( cur_work < prev_work )); }; then
+                delta=" (**new record**, WORK tiebreak)"
+              else
+                delta=" (tie)"
+              fi
             else delta=" (Δ +${d} vs record ${prev})"
             fi
           fi
