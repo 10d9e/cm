@@ -247,7 +247,7 @@ pub struct Cm {
     // Per-context slots stored array-of-structs (one packed 5-byte Slot) so a
     // bucket access touches a single cache line instead of four separate arrays.
     tab: Vec<Vec<Slot>>, // [NCTX][TSIZE]
-    sm: Vec<Vec<u32>>,   // [NCTX][256*8] StateMap: (state | bitpos<<8) -> (prob22<<10 | count)
+    sm: Vec<[u32; 2048]>, // [NCTX][256*8] StateMap: (state | bitpos<<8) -> (prob22<<10 | count)
     sm_idx: [usize; NCTX],
     tmask: [u32; NCTX],  // per-model context-table index mask
     assoc: [bool; NCTX], // model uses 2-way set-associative buckets
@@ -435,7 +435,7 @@ impl Cm {
                 ]
             })
             .collect();
-        let sm = (0..NCTX).map(|_| vec![1u32 << 31; 256 * 8]).collect();
+        let sm = (0..NCTX).map(|_| [1u32 << 31; 2048]).collect();
         let q = L1LR;
         let l1 = vec![
             Mixer::new(NINPUT, MIXCTX, q),
@@ -616,7 +616,9 @@ impl Cm {
 
     #[inline]
     fn b(&self, p: u32) -> u8 {
-        self.buf[(p & self.bufmask) as usize]
+        // buf.len() == bufmask + 1 (a power of two), so `p & bufmask` is always a
+        // valid index; skip the bounds check on this very hot byte accessor.
+        unsafe { *self.buf.get_unchecked((p & self.bufmask) as usize) }
     }
 
     pub fn byte_start(&mut self) {
@@ -1389,7 +1391,8 @@ impl Cm {
             let h = self.ctxhash[i]
                 .wrapping_mul(769)
                 .wrapping_add(self.c0 as u32);
-            let row = &mut self.tab[i];
+            // i < NCTX, so the per-model table index is always valid.
+            let row = unsafe { self.tab.get_unchecked_mut(i) };
             let ix = if self.assoc[i] {
                 // N-way set-associative: a context maps to a bucket of WAYS slots;
                 // pick the way whose checksum matches, else evict the lowest-count
@@ -1427,12 +1430,18 @@ impl Cm {
                 (h & self.tmask[i]) as usize
             };
             self.idx[i] = ix;
-            let slot = row[ix];
-            self.mix_in[i] = self.stretch[(slot.cp as i32 + 2048) as usize];
+            // ix is always a valid slot index: non-assoc uses `h & tmask` (= len-1)
+            // and the assoc branch returns base+way within the 2^tb table.
+            let slot = unsafe { *row.get_unchecked(ix) };
+            // stretch has 4096 entries; cp+2048 is in [0,4095] (the counter is a
+            // contraction toward [0,4095]) and sm>>20 is a 12-bit value, so both
+            // indices are always valid — skip the bounds check.
+            self.mix_in[i] = unsafe { *self.stretch.get_unchecked((slot.cp as i32 + 2048) as usize) };
             let mi = (slot.st as usize) | ((self.bitcount as usize) << 8);
             self.sm_idx[i] = mi;
-            let smp = (self.sm[i][mi] >> 20) as usize;
-            self.mix_in[SM_BASE + i] = self.stretch[smp];
+            // mi <= 2047 by construction (st <= 255 | bitcount<3-bit> << 8).
+            let smp = (unsafe { self.sm.get_unchecked(i) }[mi & 2047] >> 20) as usize;
+            self.mix_in[SM_BASE + i] = unsafe { *self.stretch.get_unchecked(smp) };
         }
         self.mm_used = false;
         self.mix_in[MM_BASE] = 0;
@@ -1948,7 +1957,8 @@ impl Cm {
             let s = self.sm_idx[i];
             // Borrow the counter slot once and reuse it for every field, so the
             // table is indexed a single time instead of five (no behaviour change).
-            let slot = &mut self.tab[i][ix];
+            // i < NCTX and ix is the in-range slot index chosen in `predict`.
+            let slot = unsafe { self.tab.get_unchecked_mut(i).get_unchecked_mut(ix) };
             let n = slot.cn as i32;
             let pr = slot.cp as i32 + 2048;
             slot.cp = ((pr + (((t - pr) * self.rate_tab[n as usize]) >> 12)) - 2048) as i16;
@@ -1958,7 +1968,7 @@ impl Cm {
             // StateMap: adapt prob for the observed bit-history state, then
             // advance that state. prob is 22-bit fixed point in the high bits,
             // an adaptation count (capped at 255) in the low 10 bits.
-            let smcell = &mut self.sm[i][s];
+            let smcell = &mut unsafe { self.sm.get_unchecked_mut(i) }[s & 2047];
             let entry = *smcell;
             let cnt = (entry & 1023) as i32;
             let p22 = (entry >> 10) as i32;
