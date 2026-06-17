@@ -63,7 +63,8 @@ Leaderboard of recorded submissions. Full narratives live in
 | 0056 | 2026-06-16 | @abipalli | 573376 | -165 (new record) | +17.11% | `6491617` | [0056](history/entries/0056--abipalli.md) | Size context tables to input length (recover the CI-blocked table-growth win) Th… |
 | 0057 | 2026-06-16 | @10d9e | 572769 | -607 (new record) | +17.19% | `9b3433b` | [0057](history/entries/0057--10d9e.md) | Continues extending the indirect-on-transform family (each model hashes a byte-t… |
 | 0058 | 2026-06-16 | @10d9e | 572769 | 0 (tie) | +17.19% | `e847a4b` | [0058](history/entries/0058--10d9e.md) | Pure efficiency change: SCORE is byte-for-byte identical (572769); the codec is … |
+| 0059 | 2026-06-17 | @abipalli | 572643 | -126 (new record) | +17.21% | `1134861` | [0059](history/entries/0059--abipalli.md) | Adds a **second DMC instance at a conservative clone threshold**, complementing … |
 
-**Current record: 572769** (@10d9e, entry 0057)
+**Current record: 572643** (@abipalli, entry 0059)
 
 Ledger updates are **CI-only** — see [`.github/workflows/scorekeeper.yml`](.github/workflows/scorekeeper.yml).
