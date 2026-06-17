@@ -111,17 +111,21 @@ impl Ctw {
         let mask_d = if DEPTH >= 64 { u64::MAX } else { (1u64 << DEPTH) - 1 };
         let leaf = self.get(DEPTH, self.hist & mask_d);
         let mut pred = leaf.kt_p1();
+        // The on-path child at depth d+1 is exactly the node fetched as `nd` in the
+        // previous (deeper) iteration, so carry it forward instead of re-fetching:
+        // halves the path lookups. `onpath` starts as the depth-D leaf.
+        let mut onpath = leaf;
         for d in (0..DEPTH).rev() {
             let ctx_d = self.hist & ((1u64 << d) - 1).max(0); // last d bits (0 when d==0)
             let nd = self.get(d, ctx_d);
             // children at depth d+1 split on bit d of history
-            let onpath = self.get(d + 1, self.hist & ((1u64 << (d + 1)) - 1));
             let sib_ctx = (self.hist & ((1u64 << (d + 1)) - 1)) ^ (1u64 << d);
             let sib = self.get(d + 1, sib_ctx);
             let lpc = onpath.lw + sib.lw; // ln Pw(s0)Pw(s1)
             // alpha = Pe / (Pe + Pc) = 1 / (1 + e^{lpc - lpe})
             let alpha = 1.0 / (1.0 + (lpc - nd.lpe).exp());
             pred = alpha * nd.kt_p1() + (1.0 - alpha) * pred;
+            onpath = nd; // becomes the on-path child for the next, shallower depth
         }
         let mut p = (pred * 4096.0) as i32;
         if p < 1 { p = 1; }
