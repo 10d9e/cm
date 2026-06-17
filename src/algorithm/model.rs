@@ -201,7 +201,7 @@ impl Mixer {
     /// Mix `inputs` under the given context; returns the clamped logit (the
     /// stretched prediction) and caches the squashed probability for `update`.
     #[inline]
-    fn mix(&mut self, inputs: &[i32], squash: &[i32], ctx: usize) -> i32 {
+    fn mix(&mut self, inputs: &[i64], squash: &[i32], ctx: usize) -> i32 {
         let ctx = ctx & (self.nctx - 1);
         self.ctx = ctx;
         let base = ctx * self.n;
@@ -209,11 +209,13 @@ impl Mixer {
         // base+n = (ctx+1)*n <= nctx*n = w.len() (ctx < nctx after the mask) and
         // inputs.len() == n at every call site, so both slices are always valid;
         // the i64 accumulation order is unchanged, so the result is identical.
+        // Inputs are pre-widened to i64 once per bit (the same input vector feeds
+        // every mixer), so the per-element `as i64` extend is gone from this loop.
         let w = unsafe { self.w.get_unchecked(base..base + self.n) };
         let inp = unsafe { inputs.get_unchecked(..self.n) };
         let mut dot: i64 = 0;
         for (&wi, &xi) in w.iter().zip(inp) {
-            dot += wi as i64 * xi as i64;
+            dot += wi as i64 * xi;
         }
         let mut d = (dot >> 16) as i32;
         if d > 2047 {
@@ -266,6 +268,7 @@ pub struct Cm {
     ctxhash: [u32; NCTX],
     idx: [usize; NCTX],
     mix_in: [i32; NINPUT],
+    mix_in64: [i64; NINPUT], // mix_in pre-widened to i64 for the L1 dot products
     l1: Vec<Mixer>, // layer-1 specialist mixers (different selection contexts)
     l2: Mixer,      // layer-2 combiner over the layer-1 logits (last-byte ctx)
     l2b: Mixer,     // second layer-2 combiner (bit-position ctx)
@@ -278,6 +281,7 @@ pub struct Cm {
     l2i: Mixer,     // ninth layer-2 combiner (byte-above / 2D ctx)
     l2j: Mixer,     // tenth layer-2 combiner (byte-delta / numeric ctx)
     l2_in: [i32; NL1],
+    l2_in64: [i64; NL1], // l2_in pre-widened to i64 for the L2 dot products
     buf: Vec<u8>,
     bufmask: u32,
     pos: u32,
@@ -518,6 +522,7 @@ impl Cm {
             ctxhash: [0; NCTX],
             idx: [0; NCTX],
             mix_in: [0; NINPUT],
+            mix_in64: [0; NINPUT],
             l1,
             l2,
             l2b,
@@ -530,6 +535,7 @@ impl Cm {
             l2i,
             l2j,
             l2_in: [0; NL1],
+            l2_in64: [0; NL1],
             buf: vec![0u8; bufsize as usize],
             bufmask: bufsize - 1,
             pos: 0,
@@ -1568,6 +1574,12 @@ impl Cm {
         self.mix_in[DMC_IN] = self.dmc.predict(&self.stretch);
         self.mix_in[DMC2_IN] = self.dmc2.predict(&self.stretch);
         self.mix_in[CTW_IN] = self.ctw.predict(&self.stretch);
+        // Pre-widen the full input vector to i64 once; all 27 layer-1 mixers dot
+        // the same vector, so this lifts the per-element sign-extend out of the
+        // hot loop (run 27x per bit) into a single pass.
+        for i in 0..NINPUT {
+            self.mix_in64[i] = self.mix_in[i] as i64;
+        }
         // Layer-1 specialist mixers, each selected by a different context:
         //   m0 — the proven last-byte + match-activity context (full resolution)
         //   m1 — the within-byte partial-byte context (order-0 bit position)
@@ -1583,19 +1595,19 @@ impl Cm {
         let ctx2 = ((self.c4 >> 8) & 0xff) as usize;
         let ctx3 = (self.c4 & 0xffff) as usize;
         let ctx4 = ((self.c4 & 0xffffff).wrapping_mul(0x9e37_79b1) >> 13) as usize;
-        self.l2_in[0] = self.l1[0].mix(&self.mix_in, &self.squash, ctx0);
-        self.l2_in[1] = self.l1[1].mix(&self.mix_in, &self.squash, ctx1);
-        self.l2_in[2] = self.l1[2].mix(&self.mix_in, &self.squash, ctx2);
-        self.l2_in[3] = self.l1[3].mix(&self.mix_in, &self.squash, ctx3);
-        self.l2_in[4] = self.l1[4].mix(&self.mix_in, &self.squash, ctx4);
+        self.l2_in[0] = self.l1[0].mix(&self.mix_in64, &self.squash, ctx0);
+        self.l2_in[1] = self.l1[1].mix(&self.mix_in64, &self.squash, ctx1);
+        self.l2_in[2] = self.l1[2].mix(&self.mix_in64, &self.squash, ctx2);
+        self.l2_in[3] = self.l1[3].mix(&self.mix_in64, &self.squash, ctx3);
+        self.l2_in[4] = self.l1[4].mix(&self.mix_in64, &self.squash, ctx4);
         let ctx5 = ((self.matchlen.min(15) as usize) << 2)
             | (if self.matchlen3 > 0 { 2 } else { 0 })
             | (if self.matchlen4 > 0 { 1 } else { 0 });
-        self.l2_in[5] = self.l1[5].mix(&self.mix_in, &self.squash, ctx5);
+        self.l2_in[5] = self.l1[5].mix(&self.mix_in64, &self.squash, ctx5);
         let ctx6 = (((self.col & 63) << 6) | (self.c1 as u32 & 63)) as usize;
-        self.l2_in[6] = self.l1[6].mix(&self.mix_in, &self.squash, ctx6);
+        self.l2_in[6] = self.l1[6].mix(&self.mix_in64, &self.squash, ctx6);
         let ctx7 = (self.c4.wrapping_mul(0x9e37_79b1) >> 19) as usize;
-        self.l2_in[7] = self.l1[7].mix(&self.mix_in, &self.squash, ctx7);
+        self.l2_in[7] = self.l1[7].mix(&self.mix_in64, &self.squash, ctx7);
         let ctx8 = if self.pos >= 6 {
             (self.c4.wrapping_mul(0x85eb_ca6b)
                 ^ (self.b(self.pos - 5) as u32).wrapping_mul(0xc2b2_ae35)
@@ -1603,37 +1615,37 @@ impl Cm {
         } else {
             self.c4 as usize
         };
-        self.l2_in[8] = self.l1[8].mix(&self.mix_in, &self.squash, ctx8);
+        self.l2_in[8] = self.l1[8].mix(&self.mix_in64, &self.squash, ctx8);
         // stride-2 sparse selector: bytes at pos-2 and pos-4 (interleaved structure).
         let ctx9 = if self.pos >= 4 {
             (self.b(self.pos - 2) as usize) | ((self.b(self.pos - 4) as usize) << 8)
         } else {
             self.c1 as usize
         };
-        self.l2_in[9] = self.l1[9].mix(&self.mix_in, &self.squash, ctx9);
+        self.l2_in[9] = self.l1[9].mix(&self.mix_in64, &self.squash, ctx9);
         // stride-3 sparse selector: bytes at pos-3 and pos-6.
         let ctx10 = if self.pos >= 6 {
             (self.b(self.pos - 3) as usize) | ((self.b(self.pos - 6) as usize) << 8)
         } else {
             self.c1 as usize
         };
-        self.l2_in[10] = self.l1[10].mix(&self.mix_in, &self.squash, ctx10);
+        self.l2_in[10] = self.l1[10].mix(&self.mix_in64, &self.squash, ctx10);
         // byte-above selector (2D structure): specialise on the char one line up.
         let ctx11 = (self.above_byte as usize) | ((self.c1 as usize & 1) << 9);
-        self.l2_in[11] = self.l1[11].mix(&self.mix_in, &self.squash, ctx11);
+        self.l2_in[11] = self.l1[11].mix(&self.mix_in64, &self.squash, ctx11);
         // specialise on the order-2 indirect prediction (the byte that most
         // recently followed this 2-byte context).
-        self.l2_in[12] = self.l1[12].mix(&self.mix_in, &self.squash, self.ind_pred as usize);
+        self.l2_in[12] = self.l1[12].mix(&self.mix_in64, &self.squash, self.ind_pred as usize);
         // nest-state selector: specialise on the enclosing bracket + nesting depth.
         let nestsel = if self.nest_depth > 0 {
             (self.nest_stack[self.nest_depth - 1] as usize) | ((self.nest_depth & 3) << 8)
         } else {
             0
         };
-        self.l2_in[13] = self.l1[13].mix(&self.mix_in, &self.squash, nestsel);
+        self.l2_in[13] = self.l1[13].mix(&self.mix_in64, &self.squash, nestsel);
         // high-nibble (opcode-class) selector.
         let hnsel = ((self.c4 & 0xf0f0_f0f0).wrapping_mul(0x9e37_79b1) >> 20) as usize;
-        self.l2_in[14] = self.l1[14].mix(&self.mix_in, &self.squash, hnsel);
+        self.l2_in[14] = self.l1[14].mix(&self.mix_in64, &self.squash, hnsel);
         // character-class selector (letter/digit/space/other of last 4 bytes) —
         // a coarse semantic text-mode grouping (analogous to the high-nibble one).
         let cls = |b: u32| -> usize {
@@ -1652,12 +1664,12 @@ impl Cm {
             | (cls(self.c4 >> 8) << 2)
             | (cls(self.c4 >> 16) << 4)
             | (cls(self.c4 >> 24) << 6);
-        self.l2_in[15] = self.l1[15].mix(&self.mix_in, &self.squash, ccsel);
+        self.l2_in[15] = self.l1[15].mix(&self.mix_in64, &self.squash, ccsel);
         // combined mode selector: last byte's high nibble + char-class of the
         // last two bytes (a richer visual+semantic mode than either alone).
         let modesel =
             ((self.c4 & 0xf0) >> 4) as usize | (cls(self.c4) << 4) | (cls(self.c4 >> 8) << 6);
-        self.l2_in[16] = self.l1[16].mix(&self.mix_in, &self.squash, modesel);
+        self.l2_in[16] = self.l1[16].mix(&self.mix_in64, &self.squash, modesel);
         // run-length regime selector: bucket the current run length with the
         // class of the last byte — distinguishes "in a long run" from "varying".
         let runb = {
@@ -1681,7 +1693,7 @@ impl Cm {
             }
         };
         let runsel = runb | (cls(self.c4) << 3);
-        self.l2_in[17] = self.l1[17].mix(&self.mix_in, &self.squash, runsel);
+        self.l2_in[17] = self.l1[17].mix(&self.mix_in64, &self.squash, runsel);
         // gradient / delta-sign selector: coarse sign (zero/up/down) of the last
         // three consecutive byte differences — a "numeric trend" mode.
         let dsign = |a: u32, b: u32| -> usize {
@@ -1697,7 +1709,7 @@ impl Cm {
         let gradsel = dsign(self.c4, self.c4 >> 8)
             + 3 * dsign(self.c4 >> 8, self.c4 >> 16)
             + 9 * dsign(self.c4 >> 16, self.c4 >> 24);
-        self.l2_in[18] = self.l1[18].mix(&self.mix_in, &self.squash, gradsel);
+        self.l2_in[18] = self.l1[18].mix(&self.mix_in64, &self.squash, gradsel);
         // periodic / record selector: when the period detector is confident,
         // specialise on the coarse value of the byte one period back.
         let rgl = self.rlen;
@@ -1707,7 +1719,7 @@ impl Cm {
         } else {
             0
         };
-        self.l2_in[19] = self.l1[19].mix(&self.mix_in, &self.squash, recsel);
+        self.l2_in[19] = self.l1[19].mix(&self.mix_in64, &self.squash, recsel);
         // above-char-class + nesting selector: a 2D / structural mode keyed on
         // the class of the char one line up and the current bracket depth.
         let aboveclass = if self.above_byte > 255 {
@@ -1716,7 +1728,7 @@ impl Cm {
             cls(self.above_byte)
         };
         let abovesel = aboveclass | ((self.nest_depth & 7) << 3);
-        self.l2_in[20] = self.l1[20].mix(&self.mix_in, &self.squash, abovesel);
+        self.l2_in[20] = self.l1[20].mix(&self.mix_in64, &self.squash, abovesel);
         // gradient-magnitude selector: bucket the magnitude of the last byte
         // difference (flat / small / medium / large) with the last-byte class —
         // a smooth-vs-noisy numeric mode, distinct from the delta-sign selector.
@@ -1736,7 +1748,7 @@ impl Cm {
             }
         };
         let gmagsel = dmag | (cls(self.c4) << 3);
-        self.l2_in[21] = self.l1[21].mix(&self.mix_in, &self.squash, gmagsel);
+        self.l2_in[21] = self.l1[21].mix(&self.mix_in64, &self.squash, gmagsel);
         // vertical-repeat selector: whether the byte one line up equals the last
         // byte, combined with match activity and the last-byte class.
         let vrep = if self.above_byte <= 255 && self.above_byte == self.c1 as u32 {
@@ -1745,11 +1757,11 @@ impl Cm {
             0
         };
         let vrepsel = vrep | ((if self.matchlen > 0 { 1 } else { 0 }) << 1) | (cls(self.c4) << 2);
-        self.l2_in[22] = self.l1[22].mix(&self.mix_in, &self.squash, vrepsel);
+        self.l2_in[22] = self.l1[22].mix(&self.mix_in64, &self.squash, vrepsel);
         // bit-position + match-state selector: the within-byte bit position
         // combined with whether a match is currently active.
         let bmsel = (self.c0 as usize & 0x7f) | (if self.matchlen > 0 { 128 } else { 0 });
-        self.l2_in[23] = self.l1[23].mix(&self.mix_in, &self.squash, bmsel);
+        self.l2_in[23] = self.l1[23].mix(&self.mix_in64, &self.squash, bmsel);
         // opcode-trigram selector: the high nibbles of the last three bytes — a
         // coarse instruction-class trigram (binary), distinct from the existing
         // single-nibble selector.
@@ -1757,7 +1769,7 @@ impl Cm {
             | (((self.c4 >> 12) & 0xf) << 2)
             | (((self.c4 >> 20) & 0xf) << 4)) as usize
             & 63;
-        self.l2_in[24] = self.l1[24].mix(&self.mix_in, &self.squash, optri);
+        self.l2_in[24] = self.l1[24].mix(&self.mix_in64, &self.squash, optri);
         // delta sign+magnitude selector: the last byte difference bucketed by
         // both sign and coarse magnitude (numeric trend, finer than sign alone).
         let dsm = {
@@ -1776,7 +1788,7 @@ impl Cm {
             (mb | (if neg { 4 } else { 0 })) as usize
         };
         let dsmsel = dsm | (cls(self.c4) << 3);
-        self.l2_in[25] = self.l1[25].mix(&self.mix_in, &self.squash, dsmsel);
+        self.l2_in[25] = self.l1[25].mix(&self.mix_in64, &self.squash, dsmsel);
         // column-bucket + char-class selector: a layout / text-shape mode keyed
         // on coarse column position and the last-byte class.
         let colb = {
@@ -1800,43 +1812,47 @@ impl Cm {
             }
         };
         let wlsel = colb | (cls(self.c4) << 3);
-        self.l2_in[26] = self.l1[26].mix(&self.mix_in, &self.squash, wlsel);
+        self.l2_in[26] = self.l1[26].mix(&self.mix_in64, &self.squash, wlsel);
         // Two layer-2 combiners over the layer-1 logits — one keyed on the last
         // byte, one on the within-byte bit position — averaged in the logit domain.
-        let d2a = self.l2.mix(&self.l2_in, &self.squash, self.c1 as usize);
-        let d2b = self.l2b.mix(&self.l2_in, &self.squash, self.c0 as usize);
+        // Pre-widen the 27 layer-1 logits once for the 10 layer-2 combiners.
+        for k in 0..NL1 {
+            self.l2_in64[k] = self.l2_in[k] as i64;
+        }
+        let d2a = self.l2.mix(&self.l2_in64, &self.squash, self.c1 as usize);
+        let d2b = self.l2b.mix(&self.l2_in64, &self.squash, self.c0 as usize);
         let l2cctx = ((self.matchlen.min(15) as usize) << 2)
             | (if self.matchlen3 > 0 { 2 } else { 0 })
             | (if self.matchlen4 > 0 { 1 } else { 0 });
-        let d2c = self.l2c.mix(&self.l2_in, &self.squash, l2cctx);
+        let d2c = self.l2c.mix(&self.l2_in64, &self.squash, l2cctx);
         let d2d = self
             .l2d
-            .mix(&self.l2_in, &self.squash, ((self.c4 >> 8) & 0xff) as usize);
+            .mix(&self.l2_in64, &self.squash, ((self.c4 >> 8) & 0xff) as usize);
         let l2ectx = if self.wordhash != 0 {
             (self.wordhash.wrapping_mul(0x9e37_79b1) >> 24) as usize
         } else {
             self.c1 as usize
         };
-        let d2e = self.l2e.mix(&self.l2_in, &self.squash, l2ectx);
+        let d2e = self.l2e.mix(&self.l2_in64, &self.squash, l2ectx);
         let l2fctx = ((self.c4 & 0xf0f0_f0f0).wrapping_mul(0x9e37_79b1) >> 24) as usize;
-        let d2f = self.l2f.mix(&self.l2_in, &self.squash, l2fctx);
+        let d2f = self.l2f.mix(&self.l2_in64, &self.squash, l2fctx);
         let l2gctx = cls(self.c4)
             | (cls(self.c4 >> 8) << 2)
             | (cls(self.c4 >> 16) << 4)
             | (cls(self.c4 >> 24) << 6);
-        let d2g = self.l2g.mix(&self.l2_in, &self.squash, l2gctx);
+        let d2g = self.l2g.mix(&self.l2_in64, &self.squash, l2gctx);
         let l2hctx = if self.nest_depth > 0 {
             (self.nest_stack[self.nest_depth - 1] as usize) | ((self.nest_depth & 3) << 8)
         } else {
             0
         };
-        let d2h = self.l2h.mix(&self.l2_in, &self.squash, l2hctx);
+        let d2h = self.l2h.mix(&self.l2_in64, &self.squash, l2hctx);
         let l2ictx = (self.above_byte as usize) | ((self.c1 as usize & 1) << 9);
-        let d2i = self.l2i.mix(&self.l2_in, &self.squash, l2ictx);
+        let d2i = self.l2i.mix(&self.l2_in64, &self.squash, l2ictx);
         // numeric-regime combiner: keyed on the byte-delta pattern of the last
         // three differences (captures gradient/tabular regimes).
         let l2jctx = (dsmsel & 0xff) | ((dsign(self.c4 >> 8, self.c4 >> 16)) << 6);
-        let d2j = self.l2j.mix(&self.l2_in, &self.squash, l2jctx & 0xff);
+        let d2j = self.l2j.mix(&self.l2_in64, &self.squash, l2jctx & 0xff);
         // Squash the combined logit straight to 16-bit and run the whole SSE/APM
         // chain at 16-bit precision (the calibration tables are ~16-bit), so no
         // stage re-quantizes the probability to the 12-bit 1/4096 grid.
