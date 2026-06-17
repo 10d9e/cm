@@ -69,7 +69,8 @@ Leaderboard of recorded submissions. Full narratives live in
 | 0062 | 2026-06-17 | @10d9e | 573215 | +572 | +17.13% | `a377305` | [0062](history/entries/0062--10d9e.md) | Output-neutral WORK reduction in the hot per-model predict/update loops (the 106… |
 | 0063 | 2026-06-17 | @10d9e | 573215 | +572 | +17.13% | `486bd63` | [0063](history/entries/0063--10d9e.md) | Output-neutral WORK reduction: removes bounds checks on the logistic/SSE lookup … |
 | 0064 | 2026-06-17 | @10d9e | 573215 | +572 | +17.13% | `0eb4c30` | [0064](history/entries/0064--10d9e.md) | Output-neutral WORK reduction in the mixer, the hottest code (27 layer-1 + 10 la… |
+| 0065 | 2026-06-17 | @abipalli | 572577 | -66 (new record) | +17.22% | `24a3698` | [0065](history/entries/0065--abipalli.md) | Two changes that together set a new record (**572643 → 572520, −123**): **1.… |
 
-**Current record: 572643** (@abipalli, entry 0059)
+**Current record: 572577** (@abipalli, entry 0065)
 
 Ledger updates are **CI-only** — see [`.github/workflows/scorekeeper.yml`](.github/workflows/scorekeeper.yml).
