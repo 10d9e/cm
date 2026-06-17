@@ -78,7 +78,8 @@ Leaderboard of recorded submissions. Full narratives live in
 | 0071 | 2026-06-17 | @10d9e | 572577 | 0 bytes, -1485602816 WORK (new record) | +17.22% | `505ce52` | [0071](history/entries/0071--10d9e.md) | Output-neutral WORK reduction completing the mixer fusion. The previous PR fused… |
 | 0072 | 2026-06-17 | @10d9e | 572577 | 0 bytes, -117458099 WORK (new record) | +17.22% | `6ccfc51` | [0072](history/entries/0072--10d9e.md) | Completes the mixer fusion by applying it to the 10 layer-2 combiners; the previ… |
 | 0073 | 2026-06-17 | @abipalli | 572423 | -154 (new record) | +17.24% | `09048d9` | [0073](history/entries/0073--abipalli.md) | Deepens the Context Tree Weighting model's context from 32 bits (4 bytes) to **4… |
+| 0074 | 2026-06-17 | @10d9e | 572423 | 0 bytes, -350612885 WORK (new record) | +17.24% | `3b0fdea` | [0074](history/entries/0074--10d9e.md) | Output-neutral WORK reduction in the Context Tree Weighting model. The depth-48 … |
 
-**Current record: 572423** (@abipalli, entry 0073)
+**Current record: 572423** (@10d9e, entry 0074)
 
 Ledger updates are **CI-only** — see [`.github/workflows/scorekeeper.yml`](.github/workflows/scorekeeper.yml).
