@@ -1,0 +1,6 @@
+# Build for the host CPU's full instruction set (AVX2/FMA on the x86-64 CI
+# runner, NEON on arm64). The codec is integer-only and its tables are built
+# deterministically, so this is bit-identical across CPUs — purely a speed knob
+# that lets the compute-bound mixer/SSE hot path vectorize.
+[build]
+rustflags = ["-C", "target-cpu=native"]

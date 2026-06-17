@@ -26,14 +26,24 @@ pub fn run(dir: &str) -> i32 {
         "{:<22}{:>10}{:>10}{:>9}{:>9}{:>9}  {}",
         "file", "orig", "ours", "ratio", "vs zstd", "vs xz", "lossless"
     );
-    for e in &entries {
-        let c = compress(&e.data);
-        let d = decompress(&c);
-        let lossless = d == e.data;
+    // Compress + round-trip every file in parallel (one thread per file). Files
+    // are independent, so this is identical to the serial loop, just faster on
+    // multi-core. Safe on the 16 GB CI runner now that each Cm is ~1.7 GB.
+    let results: Vec<(u64, bool)> = std::thread::scope(|s| {
+        let handles: Vec<_> = entries
+            .iter()
+            .map(|e| s.spawn(|| {
+                let c = compress(&e.data);
+                let d = decompress(&c);
+                (c.len() as u64, d == e.data)
+            }))
+            .collect();
+        handles.into_iter().map(|h| h.join().unwrap()).collect()
+    });
+    for (e, &(ours, lossless)) in entries.iter().zip(results.iter()) {
         if !lossless {
             all_lossless = false;
         }
-        let ours = c.len() as u64;
         let orig = e.data.len() as u64;
         tot_orig += orig;
         tot_ours += ours;
