@@ -49,6 +49,17 @@ printf '  %s\n' $algo_changed
 echo "== evaluate (authoritative score; runs untrusted competitor code) =="
 bash scripts/evaluate.sh --no-guard
 
+# Deterministic complexity metric (best-effort; never blocks recording). Runs the
+# merged code through the wasm fuel meter that lives outside src/algorithm/.
+work=""
+echo "== complexity metric (wasm fuel) =="
+if work_out="$(bash scripts/measure-complexity.sh 2>&1)"; then
+  echo "$work_out"
+  work="$(printf '%s\n' "$work_out" | sed -n 's/^WORK: \([0-9][0-9]*\).*/\1/p' | tail -1)"
+else
+  echo "scorekeeper: complexity metric unavailable; recording without WORK"
+fi
+
 # PR metadata. The token here is the read-only default GITHUB_TOKEN.
 author="@${GITHUB_ACTOR:-unknown}"
 model=""
@@ -76,6 +87,7 @@ fi
 
 record_args=(--ci --author "$author" --model "$model" --note "$note" --diff-base HEAD~1)
 [[ -n "$attempts" ]] && record_args+=(--attempts "$attempts")
+[[ -n "$work" ]] && record_args+=(--work "$work")
 
 echo "== record submission (generate ledger files) =="
 rec_out="$(bash scripts/record.sh "${record_args[@]}")"

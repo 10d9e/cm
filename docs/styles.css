@@ -259,6 +259,7 @@ col.w-model { width: 132px; }
 col.w-score { width: 100px; }
 col.w-delta { width: 112px; }
 col.w-zstd { width: 84px; }
+col.w-work { width: 92px; }
 col.w-open { width: 96px; }
 
 table.leaderboard th,
@@ -314,7 +315,8 @@ table.leaderboard tbody tr.record td.c-id {
 .c-delta,
 .c-open,
 .c-score,
-.c-zstd {
+.c-zstd,
+.c-work {
   overflow: visible;
   text-overflow: clip;
 }
@@ -360,6 +362,13 @@ table.leaderboard tbody tr.record td.c-id {
 
 .c-zstd {
   color: rgba(255, 255, 255, 0.68);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.c-work {
+  color: rgba(255, 255, 255, 0.5);
   font-family: var(--font-mono);
   font-size: 10px;
   font-variant-numeric: tabular-nums;

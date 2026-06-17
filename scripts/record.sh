@@ -14,6 +14,7 @@ author=""
 model=""
 note=""
 attempts=""
+work=""
 ci_mode=0
 diff_base="HEAD"
 
@@ -23,6 +24,7 @@ while [[ $# -gt 0 ]]; do
     --model) model="${2:-}"; shift 2 ;;
     --note) note="${2:-}"; shift 2 ;;
     --attempts) attempts="${2:-}"; shift 2 ;;
+    --work) work="${2:-}"; shift 2 ;;
     --ci) ci_mode=1; shift ;;
     --diff-base) diff_base="${2:-}"; shift 2 ;;
     -h|--help)
@@ -161,6 +163,9 @@ mkdir -p history/entries
   echo "| SCORE | ${score} |"
   echo "| Δ vs previous record | ${delta_str} |"
   echo "| vs zstd -22 | ${vs_zstd} |"
+  if [[ -n "$work" ]]; then
+    echo "| WORK | ${work} |"
+  fi
   echo "| Status | ${status} |"
   echo
   echo "## Approach"

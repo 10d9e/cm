@@ -16,6 +16,12 @@ jobs:
           fetch-depth: 0
 
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      # Cache cargo deps/builds (incl. the wasmtime-based complexity meter) so the
+      # extra metric step does not slow verification after the first run.
+      - uses: Swatinem/rust-cache@v2
 
       - name: PR boundary guard
         run: bash scripts/guard-pr.sh
@@ -49,6 +55,28 @@ jobs:
             echo "Do not commit \`RESULTS.md\` or \`history/entries/\`. Scorekeeper records the ledger after merge."
           } >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Complexity metric (wasm fuel, non-gating)
+        # Informational only — never fails the build. Measures WORK = init-free
+        # wasm fuel (executed operators) for a fixed corpus prefix, from a wasm
+        # shim + wasmtime host that live OUTSIDE src/algorithm/ — so it cannot be
+        # tampered with from a submission. Deterministic and machine-independent.
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          bash scripts/measure-complexity.sh | tee /tmp/fuel.out
+          {
+            echo "## Complexity metric (informational, non-gating)"
+            echo
+            echo '```'
+            cat /tmp/fuel.out
+            echo '```'
+            echo
+            echo "WORK = deterministic, tamper-proof wasm fuel (executed operators) for a"
+            echo "fixed corpus prefix, measured from outside \`src/algorithm/\`. Init-free"
+            echo "(baseline-subtracted) and reproducible on any machine; tracks compute, not"
+            echo "cache/memory, so it is not by itself a wall-time predictor."
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Comment score on PR
         # Best-effort only. Fork PRs run with a read-only GITHUB_TOKEN (GitHub
         # forces this regardless of the `pull-requests: write` declared above),
@@ -79,10 +107,15 @@ jobs:
             else delta=" (Δ +${d} vs record ${prev})"
             fi
           fi
+          work="$(grep '^WORK:' /tmp/fuel.out 2>/dev/null || true)"
           {
             echo "## CI verification passed ✅"
             echo
             echo "\`${score}\`${delta}"
+            if [[ -n "$work" ]]; then
+              echo
+              echo "\`${work}\` — deterministic, tamper-proof complexity (wasm fuel, non-gating)."
+            fi
             echo
             echo "This score was computed on GitHub Actions — local claims are not trusted."
             echo

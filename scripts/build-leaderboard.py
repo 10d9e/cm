@@ -136,6 +136,7 @@ def main() -> int:
                 "author": author,
                 "model": meta.get("model", ""),
                 "score": first_int(score),
+                "work": first_int(meta.get("work", "")),
                 "delta": delta,
                 "deltaValue": first_int(delta) if "baseline" not in delta else None,
                 "vsZstd": vs_zstd,
