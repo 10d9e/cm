@@ -197,9 +197,14 @@ impl Mixer {
         let ctx = ctx & (self.nctx - 1);
         self.ctx = ctx;
         let base = ctx * self.n;
+        // Slice both operands to exactly `n` up front so the inner loop is
+        // bounds-check-free (one range check here instead of one per element);
+        // the i64 accumulation order is unchanged, so the result is identical.
+        let w = &self.w[base..base + self.n];
+        let inp = &inputs[..self.n];
         let mut dot: i64 = 0;
-        for i in 0..self.n {
-            dot += self.w[base + i] as i64 * inputs[i] as i64;
+        for (&wi, &xi) in w.iter().zip(inp) {
+            dot += wi as i64 * xi as i64;
         }
         let mut d = (dot >> 16) as i32;
         if d > 2047 {
@@ -224,9 +229,12 @@ impl Mixer {
     fn update(&mut self, bit: i32, inputs: &[i32]) {
         let err = (bit << 12) - self.pr;
         let base = self.ctx * self.n;
-        for i in 0..self.n {
-            let delta = (inputs[i] * err * self.lr) >> 16;
-            self.w[base + i] = self.w[base + i].wrapping_add(delta);
+        // Bounds-check-free element-wise update (see `mix`): identical result.
+        let w = &mut self.w[base..base + self.n];
+        let inp = &inputs[..self.n];
+        for (wi, &xi) in w.iter_mut().zip(inp) {
+            let delta = (xi * err * self.lr) >> 16;
+            *wi = wi.wrapping_add(delta);
         }
     }
 }
@@ -1388,30 +1396,32 @@ impl Cm {
                 // way. The whole bucket lives in ~one cache line (array-of-structs).
                 let base = ((h & self.bmask[i]) << WAYS_LOG) as usize;
                 let chk = (h >> self.cshift[i]) as u8;
+                // Slice the WAYS-slot bucket once; indexing a fixed-length slice
+                // is bounds-check-free, vs. one check per probe on the full row.
+                let bucket = &mut row[base..base + WAYS];
                 let mut sel = usize::MAX;
-                let mut w = base;
-                let mut lo = row[base].cn;
+                let mut wl = 0usize;
+                let mut lo = bucket[0].cn;
                 for k in 0..WAYS {
-                    let s = base + k;
-                    if row[s].ck == chk {
-                        sel = s;
+                    if bucket[k].ck == chk {
+                        sel = k;
                         break;
                     }
-                    if row[s].cn < lo {
-                        lo = row[s].cn;
-                        w = s;
+                    if bucket[k].cn < lo {
+                        lo = bucket[k].cn;
+                        wl = k;
                     }
                 }
                 if sel != usize::MAX {
-                    sel
+                    base + sel
                 } else {
-                    row[w] = Slot {
+                    bucket[wl] = Slot {
                         cp: 0,
                         cn: 0,
                         st: 0,
                         ck: chk,
                     };
-                    w
+                    base + wl
                 }
             } else {
                 (h & self.tmask[i]) as usize
@@ -1935,24 +1945,27 @@ impl Cm {
         self.l2j.update(bit, &self.l2_in);
         for i in 0..NCTX {
             let ix = self.idx[i];
-            let n = self.tab[i][ix].cn as i32;
-            let pr = self.tab[i][ix].cp as i32 + 2048;
-            self.tab[i][ix].cp =
-                ((pr + (((t - pr) * self.rate_tab[n as usize]) >> 12)) - 2048) as i16;
+            let s = self.sm_idx[i];
+            // Borrow the counter slot once and reuse it for every field, so the
+            // table is indexed a single time instead of five (no behaviour change).
+            let slot = &mut self.tab[i][ix];
+            let n = slot.cn as i32;
+            let pr = slot.cp as i32 + 2048;
+            slot.cp = ((pr + (((t - pr) * self.rate_tab[n as usize]) >> 12)) - 2048) as i16;
             if n < CNT_LIMIT {
-                self.tab[i][ix].cn = (n + 1) as u8;
+                slot.cn = (n + 1) as u8;
             }
             // StateMap: adapt prob for the observed bit-history state, then
             // advance that state. prob is 22-bit fixed point in the high bits,
             // an adaptation count (capped at 255) in the low 10 bits.
-            let s = self.sm_idx[i];
-            let entry = self.sm[i][s];
+            let smcell = &mut self.sm[i][s];
+            let entry = *smcell;
             let cnt = (entry & 1023) as i32;
             let p22 = (entry >> 10) as i32;
             let newp = p22 + (((bit << 22) - p22) / (cnt + 2));
             let newcnt = if cnt < 511 { cnt + 1 } else { 511 };
-            self.sm[i][s] = ((newp as u32) << 10) | (newcnt as u32);
-            self.tab[i][ix].st = next_state(s as u8, bit);
+            *smcell = ((newp as u32) << 10) | (newcnt as u32);
+            slot.st = next_state(s as u8, bit);
         }
         self.c0 = (self.c0 << 1) | bit;
         self.bitcount += 1;
