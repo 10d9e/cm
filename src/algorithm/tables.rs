@@ -38,7 +38,9 @@ pub fn build() -> (Vec<i32>, Vec<i32>) {
 pub fn squash_d(squash: &[i32], d: i32) -> i32 {
     if d >= 2047 { return 4095; }
     if d <= -2047 { return 0; }
-    squash[(d + 2048) as usize]
+    // d is now in [-2046, 2046], so d+2048 is in [2, 4094] — always a valid index
+    // into the 4096-entry table; skip the bounds check on this hot lookup.
+    unsafe { *squash.get_unchecked((d + 2048) as usize) }
 }
 
 /// Build the 16-bit-resolution logistic tables for the final SSE/APM chain +
@@ -77,5 +79,7 @@ pub fn build16() -> (Vec<i32>, Vec<i32>) {
 pub fn squash16_d(squash16: &[i32], d: i32) -> i32 {
     if d >= 2047 { return 65534; }
     if d <= -2047 { return 1; }
-    squash16[(d + 2048) as usize]
+    // d in [-2046, 2046] => d+2048 in [2, 4094], a valid index into the 4096-entry
+    // table; skip the bounds check.
+    unsafe { *squash16.get_unchecked((d + 2048) as usize) }
 }
