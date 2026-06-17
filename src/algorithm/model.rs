@@ -1595,19 +1595,19 @@ impl Cm {
         let ctx2 = ((self.c4 >> 8) & 0xff) as usize;
         let ctx3 = (self.c4 & 0xffff) as usize;
         let ctx4 = ((self.c4 & 0xffffff).wrapping_mul(0x9e37_79b1) >> 13) as usize;
-        self.l2_in[0] = self.l1[0].mix(&self.mix_in64, &self.squash, ctx0);
-        self.l2_in[1] = self.l1[1].mix(&self.mix_in64, &self.squash, ctx1);
-        self.l2_in[2] = self.l1[2].mix(&self.mix_in64, &self.squash, ctx2);
-        self.l2_in[3] = self.l1[3].mix(&self.mix_in64, &self.squash, ctx3);
-        self.l2_in[4] = self.l1[4].mix(&self.mix_in64, &self.squash, ctx4);
+        self.l1[0].ctx = (ctx0) & (self.l1[0].nctx - 1);
+        self.l1[1].ctx = (ctx1) & (self.l1[1].nctx - 1);
+        self.l1[2].ctx = (ctx2) & (self.l1[2].nctx - 1);
+        self.l1[3].ctx = (ctx3) & (self.l1[3].nctx - 1);
+        self.l1[4].ctx = (ctx4) & (self.l1[4].nctx - 1);
         let ctx5 = ((self.matchlen.min(15) as usize) << 2)
             | (if self.matchlen3 > 0 { 2 } else { 0 })
             | (if self.matchlen4 > 0 { 1 } else { 0 });
-        self.l2_in[5] = self.l1[5].mix(&self.mix_in64, &self.squash, ctx5);
+        self.l1[5].ctx = (ctx5) & (self.l1[5].nctx - 1);
         let ctx6 = (((self.col & 63) << 6) | (self.c1 as u32 & 63)) as usize;
-        self.l2_in[6] = self.l1[6].mix(&self.mix_in64, &self.squash, ctx6);
+        self.l1[6].ctx = (ctx6) & (self.l1[6].nctx - 1);
         let ctx7 = (self.c4.wrapping_mul(0x9e37_79b1) >> 19) as usize;
-        self.l2_in[7] = self.l1[7].mix(&self.mix_in64, &self.squash, ctx7);
+        self.l1[7].ctx = (ctx7) & (self.l1[7].nctx - 1);
         let ctx8 = if self.pos >= 6 {
             (self.c4.wrapping_mul(0x85eb_ca6b)
                 ^ (self.b(self.pos - 5) as u32).wrapping_mul(0xc2b2_ae35)
@@ -1615,37 +1615,37 @@ impl Cm {
         } else {
             self.c4 as usize
         };
-        self.l2_in[8] = self.l1[8].mix(&self.mix_in64, &self.squash, ctx8);
+        self.l1[8].ctx = (ctx8) & (self.l1[8].nctx - 1);
         // stride-2 sparse selector: bytes at pos-2 and pos-4 (interleaved structure).
         let ctx9 = if self.pos >= 4 {
             (self.b(self.pos - 2) as usize) | ((self.b(self.pos - 4) as usize) << 8)
         } else {
             self.c1 as usize
         };
-        self.l2_in[9] = self.l1[9].mix(&self.mix_in64, &self.squash, ctx9);
+        self.l1[9].ctx = (ctx9) & (self.l1[9].nctx - 1);
         // stride-3 sparse selector: bytes at pos-3 and pos-6.
         let ctx10 = if self.pos >= 6 {
             (self.b(self.pos - 3) as usize) | ((self.b(self.pos - 6) as usize) << 8)
         } else {
             self.c1 as usize
         };
-        self.l2_in[10] = self.l1[10].mix(&self.mix_in64, &self.squash, ctx10);
+        self.l1[10].ctx = (ctx10) & (self.l1[10].nctx - 1);
         // byte-above selector (2D structure): specialise on the char one line up.
         let ctx11 = (self.above_byte as usize) | ((self.c1 as usize & 1) << 9);
-        self.l2_in[11] = self.l1[11].mix(&self.mix_in64, &self.squash, ctx11);
+        self.l1[11].ctx = (ctx11) & (self.l1[11].nctx - 1);
         // specialise on the order-2 indirect prediction (the byte that most
         // recently followed this 2-byte context).
-        self.l2_in[12] = self.l1[12].mix(&self.mix_in64, &self.squash, self.ind_pred as usize);
+        self.l1[12].ctx = (self.ind_pred as usize) & (self.l1[12].nctx - 1);
         // nest-state selector: specialise on the enclosing bracket + nesting depth.
         let nestsel = if self.nest_depth > 0 {
             (self.nest_stack[self.nest_depth - 1] as usize) | ((self.nest_depth & 3) << 8)
         } else {
             0
         };
-        self.l2_in[13] = self.l1[13].mix(&self.mix_in64, &self.squash, nestsel);
+        self.l1[13].ctx = (nestsel) & (self.l1[13].nctx - 1);
         // high-nibble (opcode-class) selector.
         let hnsel = ((self.c4 & 0xf0f0_f0f0).wrapping_mul(0x9e37_79b1) >> 20) as usize;
-        self.l2_in[14] = self.l1[14].mix(&self.mix_in64, &self.squash, hnsel);
+        self.l1[14].ctx = (hnsel) & (self.l1[14].nctx - 1);
         // character-class selector (letter/digit/space/other of last 4 bytes) —
         // a coarse semantic text-mode grouping (analogous to the high-nibble one).
         let cls = |b: u32| -> usize {
@@ -1664,12 +1664,12 @@ impl Cm {
             | (cls(self.c4 >> 8) << 2)
             | (cls(self.c4 >> 16) << 4)
             | (cls(self.c4 >> 24) << 6);
-        self.l2_in[15] = self.l1[15].mix(&self.mix_in64, &self.squash, ccsel);
+        self.l1[15].ctx = (ccsel) & (self.l1[15].nctx - 1);
         // combined mode selector: last byte's high nibble + char-class of the
         // last two bytes (a richer visual+semantic mode than either alone).
         let modesel =
             ((self.c4 & 0xf0) >> 4) as usize | (cls(self.c4) << 4) | (cls(self.c4 >> 8) << 6);
-        self.l2_in[16] = self.l1[16].mix(&self.mix_in64, &self.squash, modesel);
+        self.l1[16].ctx = (modesel) & (self.l1[16].nctx - 1);
         // run-length regime selector: bucket the current run length with the
         // class of the last byte — distinguishes "in a long run" from "varying".
         let runb = {
@@ -1693,7 +1693,7 @@ impl Cm {
             }
         };
         let runsel = runb | (cls(self.c4) << 3);
-        self.l2_in[17] = self.l1[17].mix(&self.mix_in64, &self.squash, runsel);
+        self.l1[17].ctx = (runsel) & (self.l1[17].nctx - 1);
         // gradient / delta-sign selector: coarse sign (zero/up/down) of the last
         // three consecutive byte differences — a "numeric trend" mode.
         let dsign = |a: u32, b: u32| -> usize {
@@ -1709,7 +1709,7 @@ impl Cm {
         let gradsel = dsign(self.c4, self.c4 >> 8)
             + 3 * dsign(self.c4 >> 8, self.c4 >> 16)
             + 9 * dsign(self.c4 >> 16, self.c4 >> 24);
-        self.l2_in[18] = self.l1[18].mix(&self.mix_in64, &self.squash, gradsel);
+        self.l1[18].ctx = (gradsel) & (self.l1[18].nctx - 1);
         // periodic / record selector: when the period detector is confident,
         // specialise on the coarse value of the byte one period back.
         let rgl = self.rlen;
@@ -1719,7 +1719,7 @@ impl Cm {
         } else {
             0
         };
-        self.l2_in[19] = self.l1[19].mix(&self.mix_in64, &self.squash, recsel);
+        self.l1[19].ctx = (recsel) & (self.l1[19].nctx - 1);
         // above-char-class + nesting selector: a 2D / structural mode keyed on
         // the class of the char one line up and the current bracket depth.
         let aboveclass = if self.above_byte > 255 {
@@ -1728,7 +1728,7 @@ impl Cm {
             cls(self.above_byte)
         };
         let abovesel = aboveclass | ((self.nest_depth & 7) << 3);
-        self.l2_in[20] = self.l1[20].mix(&self.mix_in64, &self.squash, abovesel);
+        self.l1[20].ctx = (abovesel) & (self.l1[20].nctx - 1);
         // gradient-magnitude selector: bucket the magnitude of the last byte
         // difference (flat / small / medium / large) with the last-byte class —
         // a smooth-vs-noisy numeric mode, distinct from the delta-sign selector.
@@ -1748,7 +1748,7 @@ impl Cm {
             }
         };
         let gmagsel = dmag | (cls(self.c4) << 3);
-        self.l2_in[21] = self.l1[21].mix(&self.mix_in64, &self.squash, gmagsel);
+        self.l1[21].ctx = (gmagsel) & (self.l1[21].nctx - 1);
         // vertical-repeat selector: whether the byte one line up equals the last
         // byte, combined with match activity and the last-byte class.
         let vrep = if self.above_byte <= 255 && self.above_byte == self.c1 as u32 {
@@ -1757,11 +1757,11 @@ impl Cm {
             0
         };
         let vrepsel = vrep | ((if self.matchlen > 0 { 1 } else { 0 }) << 1) | (cls(self.c4) << 2);
-        self.l2_in[22] = self.l1[22].mix(&self.mix_in64, &self.squash, vrepsel);
+        self.l1[22].ctx = (vrepsel) & (self.l1[22].nctx - 1);
         // bit-position + match-state selector: the within-byte bit position
         // combined with whether a match is currently active.
         let bmsel = (self.c0 as usize & 0x7f) | (if self.matchlen > 0 { 128 } else { 0 });
-        self.l2_in[23] = self.l1[23].mix(&self.mix_in64, &self.squash, bmsel);
+        self.l1[23].ctx = (bmsel) & (self.l1[23].nctx - 1);
         // opcode-trigram selector: the high nibbles of the last three bytes — a
         // coarse instruction-class trigram (binary), distinct from the existing
         // single-nibble selector.
@@ -1769,7 +1769,7 @@ impl Cm {
             | (((self.c4 >> 12) & 0xf) << 2)
             | (((self.c4 >> 20) & 0xf) << 4)) as usize
             & 63;
-        self.l2_in[24] = self.l1[24].mix(&self.mix_in64, &self.squash, optri);
+        self.l1[24].ctx = (optri) & (self.l1[24].nctx - 1);
         // delta sign+magnitude selector: the last byte difference bucketed by
         // both sign and coarse magnitude (numeric trend, finer than sign alone).
         let dsm = {
@@ -1788,7 +1788,7 @@ impl Cm {
             (mb | (if neg { 4 } else { 0 })) as usize
         };
         let dsmsel = dsm | (cls(self.c4) << 3);
-        self.l2_in[25] = self.l1[25].mix(&self.mix_in64, &self.squash, dsmsel);
+        self.l1[25].ctx = (dsmsel) & (self.l1[25].nctx - 1);
         // column-bucket + char-class selector: a layout / text-shape mode keyed
         // on coarse column position and the last-byte class.
         let colb = {
@@ -1812,7 +1812,38 @@ impl Cm {
             }
         };
         let wlsel = colb | (cls(self.c4) << 3);
-        self.l2_in[26] = self.l1[26].mix(&self.mix_in64, &self.squash, wlsel);
+        self.l1[26].ctx = (wlsel) & (self.l1[26].nctx - 1);
+        // Fused layer-1 dot products. All 27 specialists dot the *same* input
+        // vector under their own (already-selected) weight row, so iterate the
+        // inputs once — loading each mix_in64[i] a single time — and accumulate
+        // into the 27 dot products in parallel, instead of re-reading the whole
+        // input vector inside 27 separate loops. Per-row order is unchanged, so
+        // each dot (and thus the output) is identical.
+        {
+            let n = NINPUT;
+            let mut rows: [&[i32]; NL1] = [&[][..]; NL1];
+            for k in 0..NL1 {
+                let base = self.l1[k].ctx * n;
+                rows[k] = unsafe { self.l1[k].w.get_unchecked(base..base + n) };
+            }
+            let mut dot = [0i64; NL1];
+            for i in 0..n {
+                let xi = self.mix_in64[i];
+                for k in 0..NL1 {
+                    dot[k] += unsafe { *rows[k].get_unchecked(i) } as i64 * xi;
+                }
+            }
+            for k in 0..NL1 {
+                let mut d = (dot[k] >> 16) as i32;
+                if d > 2047 { d = 2047; }
+                if d < -2047 { d = -2047; }
+                let mut p = squash_d(&self.squash, d);
+                if p < 1 { p = 1; }
+                if p > 4094 { p = 4094; }
+                self.l1[k].pr = p;
+                self.l2_in[k] = d;
+            }
+        }
         // Two layer-2 combiners over the layer-1 logits — one keyed on the last
         // byte, one on the within-byte bit position — averaged in the logit domain.
         // Pre-widen the 27 layer-1 logits once for the 10 layer-2 combiners.
