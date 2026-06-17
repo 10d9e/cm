@@ -56,8 +56,11 @@ score to `RESULTS.md` and `history/entries/`.
 lpaq-class context mixing: per-bit prediction from multi-order hashed context
 models (orders 0–6 + word + sparse) with adaptive-rate counters, a learned
 match model, a context-selected logistic mixer, a two-stage APM/SSE, an x86
-BCJ filter, and a binary arithmetic coder. The objective is ratio only;
-decompression is symmetric and slow by design.
+BCJ filter, and a binary arithmetic coder. The primary objective is compression
+ratio; **WORK** (deterministic wasm fuel / executed operators, lower is faster)
+is a secondary lever — it breaks exact byte-score ties on the leaderboard and
+rewards output-neutral speedups when SCORE cannot move. Decompression is
+symmetric and slow by design.
 
 ## Improving it
 
@@ -65,5 +68,8 @@ Edit only `src/algorithm/`, run `bash scripts/evaluate.sh` locally to iterate, t
 submit with `bash scripts/submit.sh` and let CI record verified scores. See
 [`CONTRIBUTING.md`](CONTRIBUTING.md)
 and [`history/README.md`](history/README.md). The biggest known lever is replacing the plain counters with
-bit-history states + a StateMap (helps the repetitive-data cases). Details and
-constraints are in `AUTORESEARCH.md`.
+bit-history states + a StateMap (helps the repetitive-data cases). When you are
+at the record SCORE, lowering **WORK** with byte-identical output (measure via
+`bash scripts/measure-complexity.sh`) is still a valid improvement — see
+`AUTORESEARCH.md` for ranking rules and examples. Details and constraints are in
+`AUTORESEARCH.md`.

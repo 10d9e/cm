@@ -14,7 +14,10 @@ repo root.
 
 You are an automated research agent. Your job is to **lower SCORE** (total
 compressed bytes on the fixed corpus) by editing the algorithm, while a frozen
-harness measures you.
+harness measures you. **WORK** is a viable secondary lever: when SCORE is
+unchanged (especially at the current record), lowering deterministic complexity
+is still a defensible improvement — it breaks exact byte ties on the
+leaderboard and makes the codec faster without touching compression ratio.
 
 ## Start here (required)
 
@@ -52,6 +55,36 @@ adjacent ideas that stay within the rules:
 Every candidate must be **general compression** — no corpus-specific tuning,
 side channels, or nondeterminism.
 
+## WORK — secondary complexity lever
+
+**WORK** is the deterministic executed-operator count (wasm fuel) for compressing
+a fixed corpus prefix. Lower WORK means less compute; it is measured outside
+`src/algorithm/` so submissions cannot game it:
+
+```bash
+bash scripts/measure-complexity.sh
+```
+
+Ranking is **SCORE first, then WORK**. Fewer bytes always wins — even one byte
+beats any WORK gain. But when SCORE is **byte-identical** (same total and
+per-file sizes), a lower WORK submission takes the record. That makes
+output-neutral complexity reduction a first-class research path when you are
+already at (or cannot beat) the record SCORE.
+
+Pursue WORK when:
+
+- SCORE cannot improve further, or a change is neutral on bytes but clearly
+  cheaper (e.g. fewer hot-loop bounds checks, redundant map lookups removed,
+  cheaper hasher on a pre-mixed key, caching values already computed in the
+  same predict/update step).
+- You want a mergeable improvement while hunting for the next byte win — recent
+  history entries document large WORK drops at unchanged SCORE.
+
+Rules: predictions and compressed output must remain **byte-for-byte identical**
+(same `SCORE:` and per-file sizes from `evaluate.sh`). Only eliminate redundant
+work or proven-safe micro-optimizations; never change model math or state
+evolution to shave WORK.
+
 ## Iteration loop
 
 1. Edit **only** `src/algorithm/` (signatures of `compress`/`decompress` in
@@ -62,8 +95,9 @@ side channels, or nondeterminism.
    ```
 3. Accept only if: guard passes, build succeeds, round-trip tests pass, and a
    numeric `SCORE:` is printed.
-4. If SCORE improved, keep the change; otherwise revert
-   (`git checkout -- src/algorithm/`).
+4. If SCORE improved, keep the change. If SCORE is unchanged but WORK dropped
+   (`bash scripts/measure-complexity.sh`), that is also a defensible improvement
+   when byte-identical. Otherwise revert (`git checkout -- src/algorithm/`).
 5. Repeat until you have a defensible improvement or exhaust the current lead.
 
 ## Submitting
@@ -89,6 +123,8 @@ For PR workflow and CI rules, see [`CONTRIBUTING.md`](../../CONTRIBUTING.md).
 When reporting progress, include:
 
 - **SCORE** before and after (lower is better)
+- **WORK** before and after when relevant (lower is better; cite
+  `scripts/measure-complexity.sh`)
 - **Model** — which AI model assisted the work (e.g. opus 4.8, codex 5.5)
 - **Approach** — what changed and why it should help
 - **Iteration notes** — what you tried, what failed, what to try next

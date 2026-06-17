@@ -17,13 +17,34 @@ Lower SCORE is better. The current baseline numbers (smaller = we win) are in
 `corpus/baselines.tsv` (zstd -22 and xz -9e). Beating them by as much as
 possible is the goal.
 
-**Tiebreak.** SCORE is the dominant objective. When two submissions have the
-**exact same** SCORE, the one with the lower **WORK** (the deterministic
-complexity metric — wasm fuel / executed operators, printed by
-`scripts/measure-complexity.sh`) takes the record. WORK only breaks exact byte
-ties; it never overrides even a one-byte compression win, so optimizing for
-fewer bytes always comes first. A submission with no WORK measurement cannot win
-a tie.
+**Tiebreak — and a secondary optimization lever.** SCORE is the dominant
+objective. When two submissions have the **exact same** SCORE, the one with the
+lower **WORK** takes the record. WORK only breaks exact byte ties; it never
+overrides even a one-byte compression win, so optimizing for fewer bytes always
+comes first. A submission with no WORK measurement cannot win a tie.
+
+**WORK** is more than a tiebreaker: it is a viable research target when SCORE
+cannot improve (or your change is byte-neutral). Lower WORK means less compute
+on the same compressed output — a real win for a slow codec even when the byte
+count is unchanged. CI and the leaderboard rank by **(SCORE asc, WORK asc)**; at
+the current record SCORE, a submission that holds bytes constant but drops WORK
+becomes the new record (history shows many such entries: hot-loop bounds-check
+removal, redundant HashMap lookups eliminated, cheaper hashers on pre-mixed
+keys, reusing values already computed in the same predict/update step).
+
+Measure WORK locally (frozen outside `src/algorithm/`, so it cannot be gamed):
+
+```
+bash scripts/measure-complexity.sh
+```
+
+WORK is deterministic wasm fuel — the count of executed operators while
+compressing a fixed corpus prefix. Lower is faster. An output-neutral WORK
+reduction must keep **byte-identical** compression: same `SCORE:` and
+per-file sizes from `evaluate.sh`, round-trip tests passing, and the identical
+predict/update sequence on encode and decode. Do not change model math or state
+evolution to shave WORK; only remove redundant work or apply proven-safe
+micro-optimizations.
 
 ## The one hard invariant (non-negotiable)
 
@@ -107,7 +128,9 @@ rejected on review and may break on the hidden evaluation set.
    ```
    A candidate is **accepted** only if: the boundary guard passes, the build
    succeeds, all round-trip tests pass, and it prints a numeric `SCORE:`.
-3. If the new SCORE is lower than your best, keep the change; otherwise revert
+3. If the new SCORE is lower than your best, keep the change. If SCORE is
+   unchanged but WORK dropped (`bash scripts/measure-complexity.sh`) with
+   byte-identical output, that is also worth keeping. Otherwise revert
    (`git checkout -- src/algorithm`).
 4. Submit with the one script — **never** push or open the PR by hand:
    ```
@@ -146,4 +169,10 @@ compressor). The biggest known weakness is highly repetitive data
 - **Format-specific models** (text vs executable vs tabular), gated by a cheap
   detector — but keep them general, not corpus-specific.
 
-Good luck. Make the number smaller.
+When byte wins stall, scan `history/entries/` for **output-neutral WORK**
+patterns (same SCORE, lower WORK) — especially in hot per-bit paths (mixer
+loops, per-model predict/update, CTW node walks). That path is mergeable and
+competitive when tied on bytes.
+
+Good luck. Make the number smaller — and when bytes cannot move, make WORK
+smaller too.
