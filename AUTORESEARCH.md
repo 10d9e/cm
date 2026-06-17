@@ -17,6 +17,14 @@ Lower SCORE is better. The current baseline numbers (smaller = we win) are in
 `corpus/baselines.tsv` (zstd -22 and xz -9e). Beating them by as much as
 possible is the goal.
 
+**Tiebreak.** SCORE is the dominant objective. When two submissions have the
+**exact same** SCORE, the one with the lower **WORK** (the deterministic
+complexity metric — wasm fuel / executed operators, printed by
+`scripts/measure-complexity.sh`) takes the record. WORK only breaks exact byte
+ties; it never overrides even a one-byte compression win, so optimizing for
+fewer bytes always comes first. A submission with no WORK measurement cannot win
+a tie.
+
 ## The one hard invariant (non-negotiable)
 
 The codec must be **exactly lossless for every possible input**:

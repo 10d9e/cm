@@ -155,7 +155,20 @@ def main() -> int:
 
     scored = [r for r in rows if r["score"] is not None]
     baseline = scored[0]["score"] if scored else None
-    record_row = min(scored, key=lambda r: r["score"]) if scored else None
+    # Rank by (SCORE asc, then WORK asc): byte score is dominant; WORK
+    # (deterministic complexity) breaks exact byte-score ties only. A missing
+    # WORK sorts as +infinity so it can never win a tie.
+    record_row = (
+        min(
+            scored,
+            key=lambda r: (
+                r["score"],
+                r["work"] if r["work"] is not None else float("inf"),
+            ),
+        )
+        if scored
+        else None
+    )
 
     data = {
         "repo": repo,

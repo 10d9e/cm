@@ -110,8 +110,12 @@ for f in history/entries/*.md; do
 done
 entry_id="$(printf '%04d' "$next")"
 
-# Previous record = lowest SCORE in RESULTS.md (numeric rows only).
+# Previous record = lowest SCORE in RESULTS.md (numeric rows only). On an exact
+# SCORE tie, the lower WORK (deterministic complexity) wins — see the decision
+# block below — so we also remember the incumbent record's entry id to look up
+# its WORK from history/entries/.
 prev_score=""
+prev_id=""
 while IFS= read -r line; do
   # Data rows look like: | 0001 | date | @author | 642822 | ...
   case "$line" in
@@ -122,6 +126,7 @@ while IFS= read -r line; do
   [[ "$s" =~ ^[0-9]+$ ]] || continue
   if [[ -z "$prev_score" || "$s" -lt "$prev_score" ]]; then
     prev_score="$s"
+    prev_id="$(echo "$line" | awk -F'|' '{gsub(/ /,"",$2); print $2}')"
   fi
 done < RESULTS.md
 
@@ -131,8 +136,28 @@ if [[ -n "$prev_score" ]]; then
     delta_str="${delta} (new record)"
     status="record"
   elif (( delta == 0 )); then
-    delta_str="0 (tie)"
-    status="attempt"
+    # Exact byte-score tie: the lower-WORK (deterministic complexity) submission
+    # takes the record. A missing incumbent WORK counts as +infinity (so a
+    # measured challenger wins); a missing challenger WORK cannot claim the
+    # tie-win (it stays a plain tie). Byte score is otherwise always dominant.
+    prev_work=""
+    if [[ -n "$prev_id" ]]; then
+      prev_entry="$(ls history/entries/${prev_id}*.md 2>/dev/null | head -1 || true)"
+      if [[ -n "$prev_entry" ]]; then
+        prev_work="$(sed -n 's/^| WORK | \([0-9][0-9]*\) |.*/\1/p' "$prev_entry" | tail -1)"
+      fi
+    fi
+    if [[ -n "$work" ]] && { [[ -z "$prev_work" ]] || (( work < prev_work )); }; then
+      if [[ -n "$prev_work" ]]; then
+        delta_str="0 bytes, -$((prev_work - work)) WORK (new record)"
+      else
+        delta_str="0 bytes, lower WORK (new record)"
+      fi
+      status="record"
+    else
+      delta_str="0 (tie)"
+      status="attempt"
+    fi
   else
     delta_str="+${delta}"
     status="attempt"

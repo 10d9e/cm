@@ -254,7 +254,7 @@ function renderGrid(data) {
         <th class="c-score">SCORE</th>
         <th class="c-delta">Δ</th>
         <th class="c-zstd">vs zstd</th>
-        <th class="c-work" title="Deterministic complexity — wasm fuel (executed operators); lower is faster">WORK</th>
+        <th class="c-work" title="Deterministic complexity — wasm fuel (executed operators); lower is faster. Breaks exact SCORE ties: equal bytes, lower WORK wins.">WORK</th>
         <th class="c-open"></th>
       </tr>
     </thead>
