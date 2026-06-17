@@ -1,14 +1,12 @@
-//! Complexity meter. WORK = wasm fuel + heap bytes requested, both differenced
-//! (full − half prefix) to cancel one-time setup. Also reports peak linear memory
-//! (heap + stack + statics; wasm memory only grows, so final size = peak).
+//! Complexity meter. WORK = init-free wasm fuel, differenced (full − half prefix)
+//! to cancel one-time setup. Heap bytes requested and peak linear memory are
+//! reported as non-ranking diagnostics (heap is ~0.002% of WORK — see
+//! docs/proposals/0001 §4.2 — so it is not folded into the ranking number).
 
 use wasmtime::{Config, Engine, Instance, Module, Store};
 
 const FULL: u32 = 8192;
 const HALF: u32 = 4096;
-/// WORK charged per heap byte requested, relative to one executed operator —
-/// the tunable knob for how much allocation activity counts toward WORK.
-const HEAP_GAS_PER_BYTE: u64 = 1;
 
 fn main() {
     let path = std::env::args()
@@ -55,17 +53,21 @@ fn main() {
         .checked_sub(fuel_half)
         .expect("fuel cancellation invariant violated (full < half)");
     let heap_work = heap_full.saturating_sub(heap_half);
-    let work = fuel_work + HEAP_GAS_PER_BYTE * heap_work;
 
     println!("full {}B -> {}B (fuel {}, heap {} B)", FULL, out_full, fuel_full, heap_full);
     println!("half {}B -> {}B (fuel {}, heap {} B)", HALF, out_half, fuel_half, heap_half);
     println!(
-        "peak linear memory: {} pages ({} bytes; heap + stack + statics)",
+        "peak linear memory: {} pages ({} bytes; heap + stack + statics; diagnostic)",
         peak_pages,
         peak_pages as u64 * 65536
     );
     println!(
-        "WORK: {} (= {} fuel + {} x {} heap-bytes; init-free, for {} bytes; lower is faster/leaner)",
-        work, fuel_work, HEAP_GAS_PER_BYTE, heap_work, FULL - HALF
+        "heap: {} B requested (differenced; non-ranking diagnostic, ~0.002% of WORK)",
+        heap_work
+    );
+    println!(
+        "WORK: {} (init-free wasm fuel, for {} bytes; lower is faster/leaner)",
+        fuel_work,
+        FULL - HALF
     );
 }
