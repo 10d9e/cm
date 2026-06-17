@@ -59,8 +59,12 @@ match model, a context-selected logistic mixer, a two-stage APM/SSE, an x86
 BCJ filter, and a binary arithmetic coder. The primary objective is compression
 ratio; **WORK** (deterministic wasm fuel / executed operators, lower is faster)
 is a secondary lever — it breaks exact byte-score ties on the leaderboard and
-rewards output-neutral speedups when SCORE cannot move. Decompression is
-symmetric and slow by design.
+rewards output-neutral speedups when SCORE cannot move. A second, informational
+axis, **MEMCOST** (deterministic cache-miss penalty from a fixed cache model over
+the wasm access trace, via `bash scripts/measure-memcost.sh`), tracks memory/cache
+traffic — the latency cost WORK's operator count cannot see; it is shown on the
+leaderboard but does not affect ranking. Decompression is symmetric and slow by
+design.
 
 ## Improving it
 

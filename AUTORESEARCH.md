@@ -46,6 +46,25 @@ predict/update sequence on encode and decode. Do not change model math or state
 evolution to shave WORK; only remove redundant work or apply proven-safe
 micro-optimizations.
 
+**MEMCOST — a second complexity axis (memory, not compute).** WORK counts
+operators, so a cache miss and an L1 hit are the same one operator — yet native
+compress time is dominated by cache/memory latency. **MEMCOST** captures that:
+it instruments the wasm shim's loads/stores and runs the deterministic access
+trace through a fixed cache model, reporting a weighted cache-miss penalty over
+a high-entropy prefix (so the context tables and CTW node store are actually
+exercised). Lower = friendlier to memory.
+
+```
+bash scripts/measure-memcost.sh
+```
+
+MEMCOST is **informational** today — it is recorded per entry and shown on the
+leaderboard alongside WORK, but it does **not** affect ranking (only SCORE, then
+WORK, do). Use it to see whether an output-neutral change that lowers WORK also
+helps or hurts the cache: the two can diverge (e.g. a structure that executes
+fewer operators but thrashes the cache raises MEMCOST). Like WORK, it is frozen
+outside `src/algorithm/` and so cannot be gamed.
+
 ## The one hard invariant (non-negotiable)
 
 The codec must be **exactly lossless for every possible input**:
