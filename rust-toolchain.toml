@@ -1,0 +1,5 @@
+# Pins the toolchain so deterministic metrics (WORK wasm fuel, touched-lines) are
+# reproducible across machines — wasm codegen, hence fuel, varies by rustc version.
+[toolchain]
+channel = "1.93.1"
+targets = ["wasm32-unknown-unknown"]

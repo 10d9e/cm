@@ -1,7 +1,13 @@
-//! Allocator wrapper metering heap allocation. Counts requested byte sizes, so
+//! Allocator wrapper metering HEAP allocation. Counts requested byte sizes, so
 //! the numbers are deterministic (independent of OS/page size/RSS) and reserved
-//! (a `vec![0; N]` counts N at once). `allocated()` = cumulative volume;
-//! `peak()` = live high-water mark.
+//! (a `vec![0; N]` counts N at once). `allocated()` = cumulative volume (on
+//! realloc-grow only the delta is added, so it is net-new bytes); `peak()` =
+//! live high-water mark.
+//!
+//! LIMITATION: heap only. `static`/BSS, stack, and custom-arena memory are NOT
+//! counted — a `static mut [u8; N]` reports ~0 here. For a source-agnostic
+//! footprint use the wasm linear-memory high-water mark or the touched-lines
+//! meter; do not gate on this number alone.
 #![no_std]
 
 use core::alloc::{GlobalAlloc, Layout};

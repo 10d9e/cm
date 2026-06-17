@@ -62,9 +62,21 @@ peak).
 
 **(b) Full-scale reserved-memory meter** (`metrics/mem`, `scripts/measure-memory.sh`).
 The same tracking allocator wraps the *native* codec over the *whole* corpus and
-reports `MEM:` = peak live reserved bytes. Deterministic (it sums requested byte
-sizes, independent of OS/page size/RSS), reserved (a lazily-touched table counts
-in full), full-scale (no wasm32 4 GiB ceiling).
+reports `MEM:` = peak live reserved HEAP bytes. Deterministic (it sums requested
+byte sizes, independent of OS/page size/RSS), full-scale (no wasm32 4 GiB ceiling).
+**Limitation (confirmed by review): heap only.** `static`/BSS, stack, and arena
+memory are invisible — a `static mut [u8; N]` reports MEM ≈ 0. So a `MEM ≤ MEM_MAX`
+gate built on this number is bypassable by moving tables into statics. A gate must
+instead use a **source-agnostic** footprint: the wasm linear-memory high-water mark
+(`cm_mem_pages`, already reported) or the touched-lines meter `(c)`.
+
+**(c) Touched-cache-lines meter** (`metrics/lines`, prototype). Instruments every
+wasm load/store (Walrus) to call `track(addr,size)` and counts distinct 64-byte
+lines. Deterministic, and **counts touched memory regardless of source** (heap,
+static, or stack) — so it closes the gaming hole in `(b)` and is also the
+memory-*traffic* proxy that operator-fuel is blind to (a cache miss and an L1 hit
+are the same one operator). Caveat: runs on the meter's sub-4 GiB prefix today;
+full-corpus/5 GB scale needs `memory64` or a native DBI tool.
 
 ## 5. Measured finding — why both meters are needed
 
@@ -90,24 +102,53 @@ They measure different costs; keep both.
 
 ## 6. Recommendation
 
-- **Keep WORK = fuel + heap-allocation** (this PR) as the secondary ranking key —
-  it now penalizes allocation churn that pure fuel missed, at no plumbing cost.
-- **Add a full-scale memory budget** as a hard *validity gate* (like losslessness):
-  `MEM ≤ MEM_MAX` ⇒ valid, else INVALID. This is what kills the GB-for-KB
-  frontier, and it's the Hutter-Prize pattern (hard resource limits, then rank by
-  size). `metrics/mem` provides the number; pick `MEM_MAX` from observed data.
-- Optionally a `WORK_MAX` gate / wall-time cap for the slowest solutions.
-- Tunables to decide: `HEAP_GAS_PER_BYTE` (currently 1) and `MEM_MAX`.
+- **WORK = fuel + heap-allocation** is fine to keep, but note it is currently
+  near-inert: per §5 the heap term is ~0.002 % of WORK, because this codec is
+  allocation-free in steady state. The cost that actually dominates wall-clock is
+  **memory traffic** (random scatter across multi-GB tables), which neither fuel
+  nor allocation sees — a cache miss and an L1 hit are one operator either way. If
+  WORK is meant to track real cost, its next term should be **modeled cache
+  misses / touched lines `(c)`**, not allocation. Report heap churn as its own
+  line rather than overstating it as "now prices memory."
+- **Add a memory budget** as a hard *validity gate* (Hutter-Prize pattern), but
+  base it on a **source-agnostic** footprint — wasm linear-memory high-water or
+  the touched-lines meter `(c)` — **not** the heap-only `MEM`, which a `static`
+  table bypasses.
+- Optionally a `WORK_MAX` / wall-time cap for the slowest solutions.
+- Tunables to decide: `MEM_MAX`, and if kept, `HEAP_GAS_PER_BYTE`.
 
 ## 7. Measurement / gaming cautions
 
-- **Prefix vs. full corpus.** WORK runs on a fixed prefix; SCORE on the full
-  corpus. With table sizes that scale with input, the prefix under-represents the
-  full-corpus footprint (1.17 GB prefix vs 4.36 GB full). A submission could also
-  special-case the prefix. Footprint must be measured full-scale (it is, in `(b)`).
-- **Keep ranking inputs deterministic.** Wasm fuel, heap-byte counts and the
-  native reserved-byte count are reproducible across machines; native RSS and
-  wall-clock are not — don't rank on those.
+- **OPEN — WORK differencing is gameable (not closed by this PR).** `FULL=8192`/
+  `HALF=4096` are public constants over the public 8 KB sample; `compress()` sees
+  a plain `&[u8]` and can branch on `input.len()` to run a cheap path only at
+  those two lengths while the real 393,216-byte corpus runs the full algorithm —
+  undetectable by the meter. The robust fix is to meter WORK on the **full SCORE
+  corpus** (no distinguishable meter input), which forces `memory64` for the heavy
+  build (wasm32's 4 GiB ceiling). This is a maintainer design decision; until then
+  WORK is advisory, not adversarially sound.
+- **Prefix is a different regime.** WORK runs at the ≤8 KB / 2^20-table / 2^16-buf
+  regime (both prefixes sit below the 256 KB table gate), while SCORE/MEM run the
+  2^22-table / 384 KB regime. The setup-cancellation only holds within the small
+  regime; magnitudes don't transfer.
+- **Keep ranking inputs deterministic, and pin the toolchain.** Wasm fuel,
+  heap-byte counts and touched-lines are reproducible *given a pinned toolchain*
+  (wasm codegen, hence fuel, varies by rustc version) — this PR adds a
+  `rust-toolchain.toml`; builds should also use `--locked`. Native RSS and
+  wall-clock are non-deterministic — never rank on those.
+
+## 7a. Status after independent multi-agent review
+
+- **Fixed in this PR:** (blocker) a `#[global_allocator]` in `src/algorithm/` is
+  now rejected by `guard.sh`/`guard-pr.sh` (it would shadow the meters); (blocker)
+  `ci-score.sh` no longer swallows a failed/empty WORK — it aborts rather than
+  recording WORK-free; heap-only limitation of `MEM` documented; `verify.yml`
+  WORK strings corrected; `rust-toolchain.toml` added; fuel subtraction made
+  fail-loud.
+- **Open (maintainer calls):** WORK differencing gameability (§7, needs
+  full-corpus/`memory64` metering); a source-agnostic footprint for the MEM gate
+  (use `(c)` or linear-memory high-water); `HEAP_GAS_PER_BYTE` value (or drop the
+  term). This PR wires **no** gate, so these gate honest submissions today.
 
 ## 8. Suggested migration
 

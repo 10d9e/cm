@@ -51,7 +51,9 @@ fn main() {
     let fuel_half = f1 - f2;
     let heap_half = h2 - h1;
 
-    let fuel_work = fuel_full - fuel_half;
+    let fuel_work = fuel_full
+        .checked_sub(fuel_half)
+        .expect("fuel cancellation invariant violated (full < half)");
     let heap_work = heap_full.saturating_sub(heap_half);
     let work = fuel_work + HEAP_GAS_PER_BYTE * heap_work;
 
