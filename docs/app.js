@@ -260,12 +260,10 @@ function compactDelta(e) {
 }
 
 let ENTRIES_BY_ID = {};
-let LEADER_ID = null;
 
 function renderGrid(data) {
   const total = data.entries.length;
   const leaderId = data.record?.id ?? null;
-  LEADER_ID = leaderId;
   $("#entryCount").textContent = `${total} ${total === 1 ? "entry" : "entries"}`;
   ENTRIES_BY_ID = Object.fromEntries(data.entries.map((e) => [e.id, e]));
 
@@ -283,20 +281,19 @@ function renderGrid(data) {
         e.isNonWinning ? "non-winning" : "",
         e.id === leaderId ? "score-leader" : "",
       ].filter(Boolean).join(" ");
-      const scoreCell = e.id === leaderId
-        ? `<span class="c-score-leader">${scoreLeaderCrown()}${fmt(e.score)}</span>`
-        : fmt(e.score);
+      const authorLead = e.id === leaderId ? scoreLeaderCrown() : "";
       return `
       <tr class="${rowClass}" data-id="${e.id}" tabindex="0" role="button"
           aria-label="View details for entry ${e.id}">
         <td class="c-id">#${e.id}</td>
         <td class="c-author">
+          ${authorLead}
           <img class="avatar" src="${avatar}" alt="" loading="lazy"
                onerror="this.style.visibility='hidden'" />
           <span class="aname">${escapeHtml(e.author)}</span>
         </td>
         <td class="c-model">${escapeHtml(e.model || "—")}</td>
-        <td class="c-score">${scoreCell}</td>
+        <td class="c-score">${fmt(e.score)}</td>
         <td class="c-delta"><span class="badge ${deltaClass}">${escapeHtml(compactDelta(e))}</span></td>
         <td class="c-zstd">${escapeHtml(e.vsZstd)}</td>
         <td class="c-work" title="${e.work != null ? e.work + " wasm operators (deterministic, lower is faster)" : "not measured"}">${fmtWork(e.work)}</td>
@@ -409,7 +406,7 @@ function openDialog(e, repo) {
 
     <div class="d-metrics">
       ${e.model ? `<div class="d-metric"><span class="m-label">Model</span><span class="m-value">${escapeHtml(e.model)}</span></div>` : ""}
-      <div class="d-metric"><span class="m-label">SCORE</span><span class="m-value">${e.id === LEADER_ID ? `${scoreLeaderCrown()} ` : ""}${fmt(e.score)}${e.scoreRank != null ? ` <span class="m-sub">(#${e.scoreRank} of ${Object.keys(ENTRIES_BY_ID).length})</span>` : ""}</span></div>
+      <div class="d-metric"><span class="m-label">SCORE</span><span class="m-value">${fmt(e.score)}${e.scoreRank != null ? ` <span class="m-sub">(#${e.scoreRank} of ${Object.keys(ENTRIES_BY_ID).length})</span>` : ""}</span></div>
       <div class="d-metric"><span class="m-label">Δ vs record</span><span class="m-value"><span class="badge ${deltaClass}">${escapeHtml(e.delta)}</span></span></div>
       <div class="d-metric"><span class="m-label">vs zstd −22</span><span class="m-value">${escapeHtml(e.vsZstd)}</span></div>
       ${e.work != null ? `<div class="d-metric"><span class="m-label">WORK</span><span class="m-value" title="deterministic wasm fuel — executed operators; lower is faster">${fmt(e.work)}</span></div>` : ""}
