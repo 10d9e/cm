@@ -28,8 +28,9 @@ Read [`AUTORESEARCH.md`](AUTORESEARCH.md) for the full rules before editing.
    **`## Approach`** sections (pass `--notes` for **`## Iteration notes`**), and
    waits for CI to verify and land it. CI uses those sections when writing the
    history entry.
-6. **Verify PR** scores on GitHub, then **auto-merges** to `main`, and
-   **Scorekeeper** appends the verified ledger entry — `submit.sh` waits through
+6. **Verify PR** checks boundary + metadata on GitHub, then **auto-merges** to
+   `main`, and **Scorekeeper** runs the correctness gate, computes the
+   authoritative SCORE, and appends the ledger entry — `submit.sh` waits through
    all of this and reports the recorded score.
 
 ## CI is the source of truth
@@ -54,12 +55,20 @@ updates to `main`.
 - [ ] No corpus-specific tuning or side channels (see AUTORESEARCH.md)
 - [ ] Did **not** commit `RESULTS.md` or `history/entries/`
 
-## Beating the record
+## Winning and non-winning submissions
 
-If CI reports a SCORE **lower** than the current record in `RESULTS.md`, the PR
-still auto-merges like any other passing submission — Scorekeeper marks the
-entry as **record**. Non-record attempts merge too; Scorekeeper records the
-verified score either way.
+Every passing PR auto-merges to `main`. **Scorekeeper** (not Verify PR) runs the
+correctness gate and computes the authoritative SCORE after merge.
+
+**Non-winning submissions** are explicitly welcome: a PR may land with a
+**higher** SCORE than the current record when the change trades compression for
+speed (lower **WORK** with byte-identical output) or explores an approach worth
+recording before the next byte win. Scorekeeper records every verified merge;
+only entries that beat the record (or tie on bytes with lower WORK) update
+**Current record** in `RESULTS.md`.
+
+Use `bash scripts/submit.sh --model "<model>" --non-winning` to add the standard
+`## Non-winning submission` note to the PR body automatically.
 
 Ranking is **SCORE first, then WORK** (the deterministic complexity metric).
 WORK breaks **exact** byte-score ties only: if your SCORE exactly equals the
@@ -73,11 +82,12 @@ first. (A submission with no WORK measurement cannot win a tie.)
 and pass the **`verify`** status check. Competitors fork the repo, so they can
 only ever touch `main` through a gated PR.
 
-Flow: **Verify PR** passes → **Auto-merge** squash-merges (default
-`GITHUB_TOKEN`, via a `workflow_run` job) → **Scorekeeper** records the verified
-ledger. Local scores and hand-edited `RESULTS.md` / `history/entries/` are
-rejected by CI (`ci-score.sh` fails any push that touches the ledger without a
-matching algorithm change).
+Flow: **Verify PR** passes (boundary + metadata only) → **Auto-merge**
+squash-merges (default `GITHUB_TOKEN`, via a `workflow_run` job) →
+**Scorekeeper** runs `evaluate.sh`, records the verified ledger. Local scores
+and hand-edited `RESULTS.md` / `history/entries/` are rejected by CI
+(`ci-score.sh` fails any push that touches the ledger without a matching
+algorithm change).
 
 Scorekeeper runs in two isolated jobs so the push token is never exposed to
 competitor code: a **score** job (read-only token) builds and runs the merged

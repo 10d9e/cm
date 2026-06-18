@@ -160,9 +160,10 @@ rejected on review and may break on the hidden evaluation set.
    required `## Model` / `## Approach` (pass `--notes` for `## Iteration notes`) —
    CI copies these into `history/entries/` on merge — and waits for CI. **Do
    not** commit `RESULTS.md` or ledger files.
-5. `submit.sh` waits for the **Verify PR** GitHub Actions check (authoritative
-   score). It auto-merges passing PRs to `main`; Scorekeeper then writes the
-   history entry.
+5. `submit.sh` waits for the **Verify PR** check (boundary + metadata). Passing
+   PRs auto-merge to `main`; **Scorekeeper** then runs the correctness gate,
+   computes the authoritative SCORE, and writes the history entry. Non-winning
+   submissions (higher SCORE, lower WORK) are recorded too.
 6. Occasionally run `cargo test` (debug build) — it additionally catches
    integer-overflow bugs that release mode silently wraps. Use `wrapping_*`
    ops anywhere values may overflow (hashes, the mixer, `c4`).

@@ -4,8 +4,8 @@
 #
 # This wraps the contribution flow described in CONTRIBUTING.md so contributors
 # don't have to remember the gh login, the required ## Model / ## Approach PR
-# sections, or how merges land. The algorithm itself is graded by CI on GitHub —
-# the local score here is just a pre-flight check.
+# sections, or how merges land. The algorithm is graded by Scorekeeper on GitHub
+# after merge — the local score here is just a pre-flight check.
 #
 # Usage:
 #   bash scripts/submit.sh [options]
@@ -18,6 +18,8 @@
 #   --notes   <text>   ## Iteration notes body. Optional.
 #   --commit  <msg>    If the working tree has uncommitted src/algorithm/ changes,
 #                      commit them with this message first.
+#   --non-winning      Mark as a non-winning submission (higher SCORE, lower WORK /
+#                      speed focus). Adds a standard note to the PR body.
 #   --no-wait          Create the PR and exit without waiting for CI to merge.
 #   --yes              Don't prompt for confirmation before pushing/creating.
 #   -h, --help         Show this help.
@@ -30,6 +32,7 @@ TITLE=""
 APPROACH=""
 NOTES=""
 COMMIT_MSG=""
+NON_WINNING=0
 WAIT=1
 ASSUME_YES=0
 
@@ -45,6 +48,7 @@ while [[ $# -gt 0 ]]; do
     --approach) APPROACH="${2:?--approach needs a value}"; shift 2;;
     --notes)    NOTES="${2:?--notes needs a value}"; shift 2;;
     --commit)   COMMIT_MSG="${2:?--commit needs a value}"; shift 2;;
+    --non-winning) NON_WINNING=1; shift;;
     --no-wait)  WAIT=0; shift;;
     --yes|-y)   ASSUME_YES=1; shift;;
     -h|--help)  usage;;
@@ -122,7 +126,28 @@ if ! bash scripts/evaluate.sh | tee "$eval_out"; then
   die "local evaluation failed — fix before submitting"
 fi
 SCORE="$(grep -oE 'SCORE:[[:space:]]*[0-9]+' "$eval_out" | grep -oE '[0-9]+' | tail -1 || true)"
-[[ -n "$SCORE" ]] && info "local SCORE: $SCORE (CI will recompute the authoritative score)"
+[[ -n "$SCORE" ]] && info "local SCORE: $SCORE (Scorekeeper recomputes the authoritative score after merge)"
+
+if (( NON_WINNING )); then
+  info "non-winning submission — SCORE may exceed the current record"
+  if [[ -n "$SCORE" && -f RESULTS.md ]]; then
+    record="$(awk -F'|' '
+      /^\| [0-9]/ {
+        gsub(/ /,"",$5)
+        if ($5 ~ /^[0-9]+$/) { if (best=="" || $5+0 < best+0) best=$5+0 }
+      }
+      END { print best }
+    ' RESULTS.md)"
+    if [[ -n "$record" ]]; then
+      delta=$((SCORE - record))
+      if (( delta <= 0 )); then
+        info "note: local SCORE $SCORE is not above the record ($record); omit --non-winning if this is a byte win"
+      else
+        info "local SCORE $SCORE is +$delta vs record $record"
+      fi
+    fi
+  fi
+fi
 
 # ---- gather PR metadata --------------------------------------------------
 if [[ -z "$MODEL" ]]; then
@@ -155,17 +180,32 @@ body_file="$(mktemp)"
     echo
     echo "$NOTES"
   fi
+  if (( NON_WINNING )); then
+    echo
+    echo "## Non-winning submission"
+    echo
+    echo "This PR intentionally may **not** beat the current SCORE record."
+    echo "Goal: lower **WORK** (faster runtime) and/or document an approach worth"
+    echo "recording before the next byte win. Scorekeeper verifies correctness and"
+    echo "records the authoritative SCORE after merge; only record-beating entries"
+    echo "update **Current record** in \`RESULTS.md\`."
+    if [[ -n "$SCORE" ]]; then
+      echo
+      echo "Local SCORE: \`$SCORE\` (informational — Scorekeeper recomputes after merge)."
+    fi
+  fi
   echo
   echo "## Validation"
   echo
   echo '`bash scripts/evaluate.sh` passed locally; only `src/algorithm/` changed.'
-  [[ -n "$SCORE" ]] && echo "Local SCORE: \`$SCORE\` (CI recomputes the trusted score)."
+  [[ -n "$SCORE" ]] && echo "Local SCORE: \`$SCORE\` (Scorekeeper recomputes after merge)."
 } > "$body_file"
 
 echo
 echo "Branch:  $BRANCH"
 echo "Title:   $TITLE"
 echo "Model:   $MODEL"
+(( NON_WINNING )) && echo "Type:    non-winning (speed / WORK focus)"
 echo "----- PR body -----"; cat "$body_file"; echo "-------------------"
 confirm "push '$BRANCH' and open a PR?" || die "aborted"
 
@@ -208,7 +248,7 @@ if ! gh pr checks "$PR" --watch --fail-fast; then
   gh pr checks "$PR" >&2 || true
   die "CI verification failed for PR #$PR — see the run above"
 fi
-info "Verify passed; waiting for Auto-merge to land it on main"
+info "Verify passed; waiting for Auto-merge to land it on main (Scorekeeper records SCORE after merge)"
 
 # Auto-merge runs as a separate workflow_run, so poll PR state until MERGED.
 deadline=$(( $(date +%s) + 600 ))

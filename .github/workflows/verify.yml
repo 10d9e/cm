@@ -37,22 +37,18 @@ jobs:
             exit 1
           fi
 
-      - name: Correctness gate + score
+      - name: Verification summary
         run: |
-          set -euo pipefail
-          bash scripts/evaluate.sh --no-guard 2>&1 | tee /tmp/evaluate_full.out
-          awk '/^== score ==$/{found=1; next} found' /tmp/evaluate_full.out > /tmp/eval.out
-          score="$(grep '^SCORE:' /tmp/eval.out || true)"
           {
             echo "## Verification passed"
             echo
-            echo '```'
-            cat /tmp/eval.out
-            echo '```'
+            echo "PR boundary and required metadata checks passed."
             echo
-            echo "**${score}**"
+            echo "The **correctness gate** and authoritative **SCORE** run in"
+            echo "**Scorekeeper** after merge — including **non-winning** submissions"
+            echo "(higher SCORE with lower WORK / faster runtime)."
             echo
-            echo "Do not commit \`RESULTS.md\` or \`history/entries/\`. Scorekeeper records the ledger after merge."
+            echo "Do not commit \`RESULTS.md\` or \`history/entries/\`."
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Complexity metric (wasm fuel, non-gating)
@@ -77,63 +73,30 @@ jobs:
             echo "cache/memory, so it is not by itself a wall-time predictor."
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Comment score on PR
+      - name: Comment on PR
         # Best-effort only. Fork PRs run with a read-only GITHUB_TOKEN (GitHub
         # forces this regardless of the `pull-requests: write` declared above),
         # so `gh pr comment` fails with "Resource not accessible by integration".
-        # The score is already in the job summary, so a failed comment must not
+        # The summary is already in the job log, so a failed comment must not
         # fail verification — otherwise Auto-merge (gated on a successful Verify
         # PR run) would never fire for third-party submissions.
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          score="$(grep '^SCORE:' /tmp/eval.out || echo 'SCORE: unknown')"
-          # Incumbent record = lowest-SCORE row; capture its entry id too so an
-          # exact byte tie can be broken by WORK (matches the scorekeeper rule:
-          # SCORE asc, then WORK asc, with byte score dominant).
-          read -r prev prev_id < <(awk -F'|' '
-            /^\| [0-9]/ {
-              id=$2; gsub(/ /,"",id); gsub(/ /,"",$5)
-              if ($5 ~ /^[0-9]+$/) {
-                if (best=="" || $5+0 < best+0) { best=$5; bid=id }
-              }
-            }
-            END { print best, bid }
-          ' RESULTS.md)
-          cur_work="$(sed -n 's/^WORK: \([0-9][0-9]*\).*/\1/p' /tmp/fuel.out 2>/dev/null | tail -1 || true)"
-          delta=""
-          if [[ -n "$prev" && "$score" =~ SCORE:\ ([0-9]+) ]]; then
-            cur="${BASH_REMATCH[1]}"
-            d=$((cur - prev))
-            if (( d < 0 )); then delta=" (**new record**, Δ ${d})"
-            elif (( d == 0 )); then
-              # Exact byte tie: lower WORK takes the record. Missing incumbent
-              # WORK counts as +infinity; a missing PR WORK cannot claim the win.
-              prev_work=""
-              if [[ -n "$prev_id" ]]; then
-                pe="$(ls history/entries/${prev_id}*.md 2>/dev/null | head -1 || true)"
-                [[ -n "$pe" ]] && prev_work="$(sed -n 's/^| WORK | \([0-9][0-9]*\) |.*/\1/p' "$pe" | tail -1)"
-              fi
-              if [[ -n "$cur_work" ]] && { [[ -z "$prev_work" ]] || (( cur_work < prev_work )); }; then
-                delta=" (**new record**, WORK tiebreak)"
-              else
-                delta=" (tie)"
-              fi
-            else delta=" (Δ +${d} vs record ${prev})"
-            fi
-          fi
           work="$(grep '^WORK:' /tmp/fuel.out 2>/dev/null || true)"
           {
             echo "## CI verification passed ✅"
             echo
-            echo "\`${score}\`${delta}"
+            echo "Boundary guard and required PR metadata checks passed."
+            echo
+            echo "The authoritative **SCORE** and correctness gate run in **Scorekeeper**"
+            echo "after merge. Non-winning submissions (higher SCORE, lower WORK) are"
+            echo "welcome — Scorekeeper records every verified merge."
             if [[ -n "$work" ]]; then
               echo
-              echo "\`${work}\` — deterministic, tamper-proof complexity (wasm fuel, non-gating)."
+              echo "\`${work}\` — deterministic complexity preview (wasm fuel, non-gating)."
             fi
-            echo
-            echo "This score was computed on GitHub Actions — local claims are not trusted."
             echo
             echo "Auto-merge will run via **Auto-merge** workflow (default \`GITHUB_TOKEN\`)."
             echo "**Scorekeeper** will append the verified entry to \`RESULTS.md\` and"
@@ -141,5 +104,5 @@ jobs:
             echo "\`## Approach\`, \`## Iteration notes\`)."
           } > /tmp/pr-comment.md
           if ! gh pr comment "${{ github.event.pull_request.number }}" --body-file /tmp/pr-comment.md; then
-            echo "::warning::Could not post the score comment — fork PRs run with a read-only GITHUB_TOKEN. The score is in the job summary above; this does not affect verification or auto-merge."
+            echo "::warning::Could not post the verification comment — fork PRs run with a read-only GITHUB_TOKEN. See the job summary above; this does not affect verification or auto-merge."
           fi
