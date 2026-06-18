@@ -12,6 +12,9 @@
 | vs zstd -22 | +7.06% (smaller) |
 | WORK | 77422350 |
 | MEMCOST | 40081362 |
+| LINES | 66564 |
+| HEAP_PEAK | 133213580 |
+| HEAP_CHURN | 16400 |
 | Status | record |
 
 ## Approach

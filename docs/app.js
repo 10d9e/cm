@@ -237,6 +237,9 @@ function renderGrid(data) {
         <td class="c-zstd">${escapeHtml(e.vsZstd)}</td>
         <td class="c-work" title="${e.work != null ? e.work + " wasm operators (deterministic, lower is faster)" : "not measured"}">${fmtWork(e.work)}</td>
         <td class="c-memcost" title="${e.memcost != null ? e.memcost + " — deterministic cache-miss penalty (memory traffic); lower is friendlier to memory" : "not measured"}">${fmtWork(e.memcost)}</td>
+        <td class="c-lines diag" title="${e.lines != null ? e.lines + " distinct 64B cache lines touched (deterministic, non-scoring diagnostic); lower is friendlier to memory" : "not measured"}">${fmtWork(e.lines)}</td>
+        <td class="c-heappeak diag" title="${e.heapPeak != null ? e.heapPeak + " bytes peak live reserved heap over the full corpus (deterministic, non-scoring diagnostic); lower is leaner" : "not measured"}">${fmtWork(e.heapPeak)}</td>
+        <td class="c-heapchurn diag" title="${e.heapChurn != null ? e.heapChurn + " bytes init-free heap requested in steady state (deterministic, non-scoring diagnostic); lower is leaner" : "not measured"}">${fmtWork(e.heapChurn)}</td>
         <td class="c-open"><span class="open-btn">View ↗</span></td>
       </tr>`;
     })
@@ -245,7 +248,8 @@ function renderGrid(data) {
   $("#grid").innerHTML = `
     <colgroup>
       <col class="w-id" /><col class="w-author" /><col class="w-model" /><col class="w-score" />
-      <col class="w-delta" /><col class="w-zstd" /><col class="w-work" /><col class="w-open" />
+      <col class="w-delta" /><col class="w-zstd" /><col class="w-work" /><col class="w-memcost" />
+      <col class="w-lines" /><col class="w-heappeak" /><col class="w-heapchurn" /><col class="w-open" />
     </colgroup>
     <thead>
       <tr>
@@ -257,6 +261,9 @@ function renderGrid(data) {
         <th class="c-zstd">vs zstd</th>
         <th class="c-work" title="Deterministic complexity — wasm fuel (executed operators); lower is faster. Breaks exact SCORE ties: equal bytes, lower WORK wins.">WORK</th>
         <th class="c-memcost" title="Deterministic memory-traffic cost — weighted cache-miss penalty from a fixed cache model over the wasm access trace; lower is friendlier to memory (tracks cache latency, which WORK cannot).">MEMCOST</th>
+        <th class="c-lines diag" title="Diagnostic (non-scoring) — distinct 64B cache lines touched on the same init-free differencing as MEMCOST; associativity-free. Lower is friendlier to memory.">LINES</th>
+        <th class="c-heappeak diag" title="Diagnostic (non-scoring) — peak live reserved heap over the full corpus (deterministic; sums requested sizes). Lower is leaner.">HEAP_PEAK</th>
+        <th class="c-heapchurn diag" title="Diagnostic (non-scoring) — init-free heap bytes requested in steady state via the heap-tracking shim. Lower is leaner.">HEAP_CHURN</th>
         <th class="c-open"></th>
       </tr>
     </thead>
@@ -342,6 +349,9 @@ function openDialog(e, repo) {
       <div class="d-metric"><span class="m-label">vs zstd −22</span><span class="m-value">${escapeHtml(e.vsZstd)}</span></div>
       ${e.work != null ? `<div class="d-metric"><span class="m-label">WORK</span><span class="m-value" title="deterministic wasm fuel — executed operators; lower is faster">${fmt(e.work)}</span></div>` : ""}
       ${e.memcost != null ? `<div class="d-metric"><span class="m-label">MEMCOST</span><span class="m-value" title="deterministic cache-miss penalty (memory traffic); lower is friendlier to memory">${fmt(e.memcost)}</span></div>` : ""}
+      ${e.lines != null ? `<div class="d-metric"><span class="m-label">LINES</span><span class="m-value" title="distinct 64B cache lines touched (non-scoring diagnostic); lower is friendlier to memory">${fmt(e.lines)}</span></div>` : ""}
+      ${e.heapPeak != null ? `<div class="d-metric"><span class="m-label">HEAP_PEAK</span><span class="m-value" title="peak live reserved heap over the full corpus (non-scoring diagnostic); lower is leaner">${fmt(e.heapPeak)}</span></div>` : ""}
+      ${e.heapChurn != null ? `<div class="d-metric"><span class="m-label">HEAP_CHURN</span><span class="m-value" title="init-free heap bytes requested in steady state (non-scoring diagnostic); lower is leaner">${fmt(e.heapChurn)}</span></div>` : ""}
       <div class="d-metric"><span class="m-label">commit</span><span class="m-value"><a class="sha" href="${commitUrl}" target="_blank" rel="noopener">${escapeHtml(e.commit)}</a></span></div>
     </div>
 
