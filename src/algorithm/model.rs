@@ -22,7 +22,7 @@ const CTW_IN: usize = 2 * NCTX + 8; // Context Tree Weighting prediction
 const NINPUT: usize = 2 * NCTX + 9;
 const TBITS: u32 = 20; // default per-model context-table size (2^TBITS slots)
 const MIXCTX: usize = 16384;
-const NL1: usize = 19; // perf trim 22->19
+const NL1: usize = 16; // perf trim 19->16
 const L1LR: i32 = 8; // layer-1 specialist learning rate
 const L2LR: i32 = 10; // layer-2 combiner learning rate
 const MIX3CTX: usize = 8192; // order-2 specialist rows
@@ -420,9 +420,6 @@ impl Cm {
             Mixer::new(NINPUT, 1024, q),
             Mixer::new(NINPUT, 4096, q),
             Mixer::new(NINPUT, 256, q),
-            Mixer::new(NINPUT, 256, q),
-            Mixer::new(NINPUT, 64, q),  // run-length regime selector
-            Mixer::new(NINPUT, 32, q),  // gradient / delta-sign selector
         ];
         let l2 = Mixer::new(NL1, 256, L2LR);
         let l2b = Mixer::new(NL1, 256, L2LR);
@@ -1608,9 +1605,8 @@ impl Cm {
         self.l1[15].ctx = (ccsel) & (self.l1[15].nctx - 1);
         // combined mode selector: last byte's high nibble + char-class of the
         // last two bytes (a richer visual+semantic mode than either alone).
-        let modesel =
+        let _modesel =
             ((self.c4 & 0xf0) >> 4) as usize | (cls(self.c4) << 4) | (cls(self.c4 >> 8) << 6);
-        self.l1[16].ctx = (modesel) & (self.l1[16].nctx - 1);
         // run-length regime selector: bucket the current run length with the
         // class of the last byte — distinguishes "in a long run" from "varying".
         let runb = {
@@ -1633,8 +1629,7 @@ impl Cm {
                 7
             }
         };
-        let runsel = runb | (cls(self.c4) << 3);
-        self.l1[17].ctx = (runsel) & (self.l1[17].nctx - 1);
+        let _runsel = runb | (cls(self.c4) << 3);
         // gradient / delta-sign selector: coarse sign (zero/up/down) of the last
         // three consecutive byte differences — a "numeric trend" mode.
         let dsign = |a: u32, b: u32| -> usize {
@@ -1647,10 +1642,9 @@ impl Cm {
                 2
             }
         };
-        let gradsel = dsign(self.c4, self.c4 >> 8)
+        let _gradsel = dsign(self.c4, self.c4 >> 8)
             + 3 * dsign(self.c4 >> 8, self.c4 >> 16)
             + 9 * dsign(self.c4 >> 16, self.c4 >> 24);
-        self.l1[18].ctx = (gradsel) & (self.l1[18].nctx - 1);
         // periodic / record selector: when the period detector is confident,
         // specialise on the coarse value of the byte one period back.
         let rgl = self.rlen;
