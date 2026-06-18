@@ -6,7 +6,6 @@
 //! lossless on all inputs and the predict/update sequence stays identical
 //! between encode and decode.
 
-use super::ctw::Ctw;
 use super::dmc::Dmc;
 use super::tables::{build, build16, squash16_d, squash_d};
 
@@ -285,7 +284,6 @@ pub struct Cm {
     apm4: Apm,
     dmc: Dmc,
     dmc2: Dmc,
-    ctw: Ctw,
     c0: i32,
     bitcount: i32,
     c4: u32,
@@ -534,7 +532,6 @@ impl Cm {
             apm4,
             dmc: Dmc::new(2, 2),
             dmc2: Dmc::new(8, 8),
-            ctw: Ctw::new(),
             c0: 1,
             bitcount: 0,
             c4: 0,
@@ -1520,7 +1517,7 @@ impl Cm {
         // DMC variable-order Markov prediction — one extra mixer input.
         self.mix_in[DMC_IN] = self.dmc.predict(&self.stretch);
         self.mix_in[DMC2_IN] = self.dmc2.predict(&self.stretch);
-        self.mix_in[CTW_IN] = self.ctw.predict(&self.stretch);
+        self.mix_in[CTW_IN] = 0; // CTW removed (perf)
         // Pre-widen the full input vector to i64 once; all 27 layer-1 mixers dot
         // the same vector, so this lifts the per-element sign-extend out of the
         // hot loop (run 27x per bit) into a single pass.
@@ -1703,14 +1700,14 @@ impl Cm {
         } else {
             0
         };
-        let vrepsel = vrep | ((if self.matchlen > 0 { 1 } else { 0 }) << 1) | (cls(self.c4) << 2);
+        let _vrepsel = vrep | ((if self.matchlen > 0 { 1 } else { 0 }) << 1) | (cls(self.c4) << 2);
         // bit-position + match-state selector: the within-byte bit position
         // combined with whether a match is currently active.
-        let bmsel = (self.c0 as usize & 0x7f) | (if self.matchlen > 0 { 128 } else { 0 });
+        let _bmsel = (self.c0 as usize & 0x7f) | (if self.matchlen > 0 { 128 } else { 0 });
         // opcode-trigram selector: the high nibbles of the last three bytes — a
         // coarse instruction-class trigram (binary), distinct from the existing
         // single-nibble selector.
-        let optri = (((self.c4 >> 4) & 0xf)
+        let _optri = (((self.c4 >> 4) & 0xf)
             | (((self.c4 >> 12) & 0xf) << 2)
             | (((self.c4 >> 20) & 0xf) << 4)) as usize
             & 63;
@@ -1754,7 +1751,7 @@ impl Cm {
                 7
             }
         };
-        let wlsel = colb | (cls(self.c4) << 3);
+        let _wlsel = colb | (cls(self.c4) << 3);
         // Fused layer-1 dot products. All 27 specialists dot the *same* input
         // vector under their own (already-selected) weight row, so iterate the
         // inputs once — loading each mix_in64[i] a single time — and accumulate
@@ -1930,7 +1927,7 @@ impl Cm {
         self.apm4.update(bit);
         self.dmc.update(bit);
         self.dmc2.update(bit);
-        self.ctw.update(bit);
+        // CTW removed (perf)
         if self.mm_used {
             let v = self.mm_sm[self.mm_idx] as i32;
             self.mm_sm[self.mm_idx] = (v + (((if bit != 0 { 65535 } else { 0 }) - v) >> 6)) as u16;
