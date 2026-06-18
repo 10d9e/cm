@@ -36,24 +36,43 @@ if [[ ! -f "$IN_DIR/RESULTS.md" || ! -f "$IN_DIR/entries/$ENTRY_FILE" ]]; then
 fi
 
 # Apply only the ledger paths onto the current (fresh) checkout of main.
-cp "$IN_DIR/RESULTS.md" RESULTS.md
-mkdir -p history/entries
-cp "$IN_DIR/entries/$ENTRY_FILE" "history/entries/$ENTRY_FILE"
-
-git add RESULTS.md "history/entries/$ENTRY_FILE"
-if git diff --staged --quiet; then
-  echo "publish: no ledger changes to commit"
-  exit 0
-fi
-
 git config user.name "github-actions[bot]"
 git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-git commit -m "$(cat <<EOF
+
+# Re-apply the ledger onto the LATEST main and push, retrying on a lost race with
+# concurrent algorithm auto-merges. Those merges advance main during the multi-
+# minute score phase but only touch src/algorithm/ — never RESULTS.md or
+# history/entries/ — and the scorekeeper workflow is serialized (concurrency:
+# scorekeeper-main), so no other run can change the ledger underneath us.
+# Re-applying the already-computed ledger files onto a freshly fetched main is
+# therefore always correct; we just have to land on top of whatever algorithm
+# commits arrived, instead of pushing a now-stale parent (the old single push
+# failed non-fast-forward whenever the next PR merged before publish).
+for attempt in $(seq 1 8); do
+  git fetch --quiet origin main
+  git reset --quiet --hard origin/main
+  cp "$IN_DIR/RESULTS.md" RESULTS.md
+  mkdir -p history/entries
+  cp "$IN_DIR/entries/$ENTRY_FILE" "history/entries/$ENTRY_FILE"
+  git add RESULTS.md "history/entries/$ENTRY_FILE"
+  if git diff --staged --quiet; then
+    echo "publish: ledger already current (entry ${ENTRY_ID}); nothing to push"
+    exit 0
+  fi
+  git commit -q -m "$(cat <<EOF
 ci: record submission ${ENTRY_ID} [skip ci]
 
 Authoritative ledger update from verified evaluate on main.
 EOF
 )"
-git push origin HEAD:main
+  if git push --quiet origin HEAD:main; then
+    echo "publish: ledger committed and pushed (entry ${ENTRY_ID}, attempt ${attempt})"
+    exit 0
+  fi
+  echo "publish: push rejected — main advanced during scoring; retrying (attempt ${attempt})"
+  sleep $(( (RANDOM % 5) + 1 ))
+done
+echo "publish: failed to push ledger after 8 attempts" >&2
+exit 1
 
 echo "publish: ledger committed and pushed (entry ${ENTRY_ID})"
