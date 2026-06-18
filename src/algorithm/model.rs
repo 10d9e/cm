@@ -9,7 +9,7 @@
 use super::dmc::Dmc;
 use super::tables::{build, build16, squash16_d, squash_d};
 
-const NCTX: usize = 96; // perf trim 106->96 (drop 10 tail context models)
+const NCTX: usize = 86; // perf trim 96->86
                          // Mixer input layout:
                          //   [0 .. NCTX)            direct adaptive counters
                          //   [SM_BASE .. SM_BASE+NCTX) bit-history StateMap predictions (one per context)
@@ -1139,89 +1139,6 @@ impl Cm {
             last_open.wrapping_mul(0x9e37_79b1)
                 ^ ((self.nest_depth as u32 & 31) << 16)
                 ^ (c4 & 0xffff),
-        );
-        // High-nibble (opcode-class) context: the top nibble of the last 5 bytes,
-        // ignoring low-bit operand noise — targets executable/binary structure.
-        let hn = (c4 & 0xf0f0_f0f0)
-            ^ if self.pos >= 5 {
-                ((self.b(self.pos - 5) as u32) & 0xf0) << 24
-            } else {
-                0
-            };
-        self.ctxhash[86] = hashk(0x7700, hn);
-        // longer high-nibble context (last 8 bytes' top nibbles), order-8-coarse.
-        self.ctxhash[87] = if self.pos >= 8 {
-            hashk(
-                0x7800,
-                hn.wrapping_mul(0x9e37_79b1)
-                    ^ ((self.b(self.pos - 6) as u32 & 0xf0) << 4)
-                    ^ ((self.b(self.pos - 7) as u32 & 0xf0) << 12)
-                    ^ ((self.b(self.pos - 8) as u32 & 0xf0) << 20),
-            )
-        } else {
-            hashk(0x7800, hn)
-        };
-        // byte-delta context: differences between consecutive recent bytes —
-        // captures gradients/patterns in numeric and tabular data.
-        let d1 = (c4 & 0xff).wrapping_sub((c4 >> 8) & 0xff) & 0xff;
-        let d2 = ((c4 >> 8) & 0xff).wrapping_sub((c4 >> 16) & 0xff) & 0xff;
-        let d3 = ((c4 >> 16) & 0xff).wrapping_sub((c4 >> 24) & 0xff) & 0xff;
-        self.ctxhash[88] = hashk(0x7900, d1 | (d2 << 8) | (d3 << 16));
-        // Indirect order-5 / order-6 models: the longer base context combined
-        // with the recent history of bytes that have followed it. Extends the
-        // order-1..4 indirect family to deterministic longer-range structure
-        // (helps executable/source repeats the direct long orders miss).
-        if self.pos >= 5 {
-            let m5 = c4.wrapping_mul(0x9e37_79b1)
-                ^ (self.b(self.pos - 5) as u32).wrapping_mul(0x85eb_ca6b);
-            let k5 = (m5 >> (32 - FBITS)) as usize;
-            self.ctxhash[89] = hashk(0x7A00, m5 ^ self.follow5[k5].wrapping_mul(0xc2b2_ae35));
-        } else {
-            self.ctxhash[89] = 0;
-        }
-        if self.pos >= 6 {
-            let m6 = c4.wrapping_mul(0x85eb_ca6b)
-                ^ (self.b(self.pos - 5) as u32).wrapping_mul(0xc2b2_ae35)
-                ^ (self.b(self.pos - 6) as u32).wrapping_mul(0x27d4_eb2f);
-            let k6 = (m6 >> (32 - FBITS)) as usize;
-            self.ctxhash[90] = hashk(0x7B00, m6 ^ self.follow6[k6].wrapping_mul(0x9e37_79b1));
-        } else {
-            self.ctxhash[90] = 0;
-        }
-        // High-nibble indirect: the opcode-class pattern (high nibble of the last
-        // four bytes) combined with the recent history of bytes that followed it.
-        // Merges the high-nibble and indirect families to capture "what operand
-        // byte usually follows this instruction-class pattern" in executables.
-        let hnm = (c4 & 0xf0f0_f0f0).wrapping_mul(0x9e37_79b1);
-        let khn = (hnm >> (32 - FBITS)) as usize;
-        self.ctxhash[91] = hashk(0x7C00, hnm ^ self.followhn[khn].wrapping_mul(0xc2b2_ae35));
-        // Byte-delta indirect: the consecutive-difference pattern combined with
-        // the recent history of bytes that followed it (numeric/tabular regimes).
-        let dm = (d1 | (d2 << 8) | (d3 << 16)).wrapping_mul(0x85eb_ca6b);
-        let kd = (dm >> (32 - FBITS)) as usize;
-        self.ctxhash[92] = hashk(0x7D00, dm ^ self.followd[kd].wrapping_mul(0x27d4_eb2f));
-        // Char-class indirect: the letter/digit/space/other pattern of the last
-        // four bytes combined with the bytes that have followed it (text regimes).
-        let cck = cls4(c4);
-        self.ctxhash[93] = hashk(
-            0x7E00,
-            cck ^ self.followc[cck as usize].wrapping_mul(0x9e37_79b1),
-        );
-        // Low-nibble indirect: the low nibbles of the last four bytes (operand /
-        // register pattern in code) combined with the bytes that followed it.
-        let lnm = (c4 & 0x0f0f_0f0f).wrapping_mul(0xc2b2_ae35);
-        let kln = (lnm >> (32 - FBITS)) as usize;
-        self.ctxhash[94] = hashk(0x7F00, lnm ^ self.followln[kln].wrapping_mul(0x85eb_ca6b));
-        // Gap-bigram indirect: the (last byte, byte three back) sparse pair plus
-        // the bytes that followed it.
-        let gk = if self.pos >= 3 {
-            (c4 & 0xff) | ((self.b(self.pos - 3) as u32) << 8)
-        } else {
-            c4 & 0xffff
-        };
-        self.ctxhash[95] = hashk(
-            0x8000,
-            gk ^ self.followg[gk as usize].wrapping_mul(0x27d4_eb2f),
         );
     }
 
