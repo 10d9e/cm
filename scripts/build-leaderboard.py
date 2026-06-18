@@ -153,7 +153,6 @@ def main() -> int:
                 "iterationNotes": sections.get("iteration notes", ""),
                 "algoChanges": strip_code_fence(sections.get("algorithm changes", "")),
                 "evalSnapshot": strip_code_fence(sections.get("eval snapshot", "")),
-                "isRecord": "record" in delta.lower(),
             }
         )
 
@@ -162,17 +161,25 @@ def main() -> int:
     # Rank by (SCORE asc, then WORK asc): byte score is dominant; WORK
     # (deterministic complexity) breaks exact byte-score ties only. A missing
     # WORK sorts as +infinity so it can never win a tie.
-    record_row = (
-        min(
-            scored,
-            key=lambda r: (
-                r["score"],
-                r["work"] if r["work"] is not None else float("inf"),
-            ),
+    def rank_key(r: dict) -> tuple:
+        return (
+            r["score"],
+            r["work"] if r["work"] is not None else float("inf"),
         )
-        if scored
-        else None
-    )
+
+    record_row = min(scored, key=rank_key) if scored else None
+    sorted_by_score = sorted(scored, key=rank_key)
+    score_rank = {r["id"]: i + 1 for i, r in enumerate(sorted_by_score)}
+
+    for r in rows:
+        if r["score"] is None:
+            continue
+        r["scoreRank"] = score_rank[r["id"]]
+        r["isRecord"] = r.get("status", "").lower() == "record"
+        if record_row is None:
+            r["isNonWinning"] = False
+            continue
+        r["isNonWinning"] = rank_key(r) > rank_key(record_row)
 
     data = {
         "repo": repo,
