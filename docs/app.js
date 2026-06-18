@@ -43,6 +43,10 @@ function fmtWork(n) {
   return n.toLocaleString("en-US");
 }
 
+function scoreLeaderCrown(title = "Current SCORE leader") {
+  return `<span class="score-crown" title="${title}" aria-label="${title}"><svg viewBox="0 0 24 24" width="11" height="11" fill="currentColor" aria-hidden="true"><path d="M2 19h20v2H2v-2zm2.4-8.2 2.1 2.1 3.5-6.3 3.5 6.3 2.1-2.1L20.6 19H3.4l1-8.2zM5.2 17h13.6l-.9-7.4-1.6 1.6L12 5.5 9.7 11.2 8.1 9.6 5.2 17z"/></svg></span>`;
+}
+
 const BASELINE_COLORS = {
   zstd22: "rgba(255, 255, 255, 0.22)",
   xz9e: "rgba(255, 255, 255, 0.16)",
@@ -256,9 +260,12 @@ function compactDelta(e) {
 }
 
 let ENTRIES_BY_ID = {};
+let LEADER_ID = null;
 
 function renderGrid(data) {
   const total = data.entries.length;
+  const leaderId = data.record?.id ?? null;
+  LEADER_ID = leaderId;
   $("#entryCount").textContent = `${total} ${total === 1 ? "entry" : "entries"}`;
   ENTRIES_BY_ID = Object.fromEntries(data.entries.map((e) => [e.id, e]));
 
@@ -271,7 +278,14 @@ function renderGrid(data) {
         ? `https://github.com/${encodeURIComponent(user)}.png?size=80`
         : "";
       const deltaClass = e.isRecord ? "good" : e.isNonWinning ? "warn" : "flat";
-      const rowClass = e.isRecord ? "record" : e.isNonWinning ? "non-winning" : "";
+      const rowClass = [
+        e.isRecord ? "record" : "",
+        e.isNonWinning ? "non-winning" : "",
+        e.id === leaderId ? "score-leader" : "",
+      ].filter(Boolean).join(" ");
+      const scoreCell = e.id === leaderId
+        ? `<span class="c-score-leader">${scoreLeaderCrown()}${fmt(e.score)}</span>`
+        : fmt(e.score);
       return `
       <tr class="${rowClass}" data-id="${e.id}" tabindex="0" role="button"
           aria-label="View details for entry ${e.id}">
@@ -282,7 +296,7 @@ function renderGrid(data) {
           <span class="aname">${escapeHtml(e.author)}</span>
         </td>
         <td class="c-model">${escapeHtml(e.model || "—")}</td>
-        <td class="c-score">${fmt(e.score)}</td>
+        <td class="c-score">${scoreCell}</td>
         <td class="c-delta"><span class="badge ${deltaClass}">${escapeHtml(compactDelta(e))}</span></td>
         <td class="c-zstd">${escapeHtml(e.vsZstd)}</td>
         <td class="c-work" title="${e.work != null ? e.work + " wasm operators (deterministic, lower is faster)" : "not measured"}">${fmtWork(e.work)}</td>
@@ -395,7 +409,7 @@ function openDialog(e, repo) {
 
     <div class="d-metrics">
       ${e.model ? `<div class="d-metric"><span class="m-label">Model</span><span class="m-value">${escapeHtml(e.model)}</span></div>` : ""}
-      <div class="d-metric"><span class="m-label">SCORE</span><span class="m-value">${fmt(e.score)}${e.scoreRank != null ? ` <span class="m-sub">(#${e.scoreRank} of ${Object.keys(ENTRIES_BY_ID).length})</span>` : ""}</span></div>
+      <div class="d-metric"><span class="m-label">SCORE</span><span class="m-value">${e.id === LEADER_ID ? `${scoreLeaderCrown()} ` : ""}${fmt(e.score)}${e.scoreRank != null ? ` <span class="m-sub">(#${e.scoreRank} of ${Object.keys(ENTRIES_BY_ID).length})</span>` : ""}</span></div>
       <div class="d-metric"><span class="m-label">Δ vs record</span><span class="m-value"><span class="badge ${deltaClass}">${escapeHtml(e.delta)}</span></span></div>
       <div class="d-metric"><span class="m-label">vs zstd −22</span><span class="m-value">${escapeHtml(e.vsZstd)}</span></div>
       ${e.work != null ? `<div class="d-metric"><span class="m-label">WORK</span><span class="m-value" title="deterministic wasm fuel — executed operators; lower is faster">${fmt(e.work)}</span></div>` : ""}

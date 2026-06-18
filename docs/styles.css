@@ -374,6 +374,29 @@ table.leaderboard tbody tr.non-winning td.c-id {
   color: #fff;
 }
 
+.c-score-leader {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.score-crown {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #fbbf24;
+  flex-shrink: 0;
+  filter: drop-shadow(0 0 4px rgba(251, 191, 36, 0.35));
+}
+
+.score-crown svg {
+  display: block;
+}
+
+table.leaderboard tbody tr.score-leader td.c-score {
+  color: #fff;
+}
+
 .c-zstd {
   color: rgba(255, 255, 255, 0.68);
   font-family: var(--font-mono);
