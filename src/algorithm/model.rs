@@ -9,7 +9,7 @@
 use super::dmc::Dmc;
 use super::tables::{build, build16, squash16_d, squash_d};
 
-const NCTX: usize = 106; // orders + word/n-gram + sparse + 2D + record + indirect + run + nest + nibble + text shape/layout
+const NCTX: usize = 96; // perf trim 106->96 (drop 10 tail context models)
                          // Mixer input layout:
                          //   [0 .. NCTX)            direct adaptive counters
                          //   [SM_BASE .. SM_BASE+NCTX) bit-history StateMap predictions (one per context)
@@ -1222,120 +1222,6 @@ impl Cm {
         self.ctxhash[95] = hashk(
             0x8000,
             gk ^ self.followg[gk as usize].wrapping_mul(0x27d4_eb2f),
-        );
-        // Stride-2 indirect: the (pos-2, pos-4) interleaved pair plus its history.
-        let sk = if self.pos >= 4 {
-            (self.b(self.pos - 2) as u32) | ((self.b(self.pos - 4) as u32) << 8)
-        } else {
-            c4 & 0xffff
-        };
-        self.ctxhash[96] = hashk(
-            0x8100,
-            sk ^ self.follows2[sk as usize].wrapping_mul(0x9e37_79b1),
-        );
-        // Stride-3 indirect: the (pos-3, pos-6) pair plus its follow history.
-        let s3k = if self.pos >= 6 {
-            (self.b(self.pos - 3) as u32) | ((self.b(self.pos - 6) as u32) << 8)
-        } else {
-            c4 & 0xffff
-        };
-        self.ctxhash[97] = hashk(
-            0x8200,
-            s3k ^ self.follows3[s3k as usize].wrapping_mul(0x85eb_ca6b),
-        );
-        // Wide-gap indirect: the (last byte, byte five back) sparse pair plus its
-        // follow history (longer-range sparse structure).
-        let g2k = if self.pos >= 5 {
-            (c4 & 0xff) | ((self.b(self.pos - 5) as u32) << 8)
-        } else {
-            c4 & 0xffff
-        };
-        self.ctxhash[98] = hashk(
-            0x8300,
-            g2k ^ self.followg2[g2k as usize].wrapping_mul(0xc2b2_ae35),
-        );
-        // 8-byte high-nibble indirect: extends the (winning) 4-byte high-nibble
-        // indirect to an 8-byte opcode-class pattern — longer instruction-class
-        // context for executables.
-        let hn8 = if self.pos >= 8 {
-            hnm ^ ((self.b(self.pos - 5) as u32 & 0xf0) << 4)
-                ^ ((self.b(self.pos - 6) as u32 & 0xf0) << 12)
-                ^ ((self.b(self.pos - 7) as u32 & 0xf0) << 20)
-                ^ ((self.b(self.pos - 8) as u32 & 0xf0).wrapping_mul(0x85eb_ca6b))
-        } else {
-            hnm
-        };
-        let khn8 = (hn8 >> (32 - FBITS)) as usize;
-        self.ctxhash[99] = hashk(0x8500, hn8 ^ self.followhn8[khn8].wrapping_mul(0x27d4_eb2f));
-        // Stride-4 indirect: the (pos-4, pos-8) pair plus its follow history —
-        // dword-aligned periodic structure (operand/address tables in code).
-        let s4k = if self.pos >= 8 {
-            (self.b(self.pos - 4) as u32) | ((self.b(self.pos - 8) as u32) << 8)
-        } else {
-            c4 & 0xffff
-        };
-        self.ctxhash[100] = hashk(
-            0x8600,
-            s4k ^ self.follows4[s4k as usize].wrapping_mul(0x9e37_79b1),
-        );
-        // 8-byte low-nibble indirect: operand/register-pattern analog of hn8.
-        let ln8 = if self.pos >= 8 {
-            (c4 & 0x0f0f_0f0f).wrapping_mul(0xc2b2_ae35)
-                ^ ((self.b(self.pos - 5) as u32 & 0x0f) << 4)
-                ^ ((self.b(self.pos - 6) as u32 & 0x0f) << 12)
-                ^ ((self.b(self.pos - 7) as u32 & 0x0f) << 20)
-                ^ ((self.b(self.pos - 8) as u32 & 0x0f).wrapping_mul(0x9e37_79b1))
-        } else {
-            (c4 & 0x0f0f_0f0f).wrapping_mul(0xc2b2_ae35)
-        };
-        let kln8 = (ln8 >> (32 - FBITS)) as usize;
-        self.ctxhash[101] = hashk(0x8700, ln8 ^ self.followln8[kln8].wrapping_mul(0x27d4_eb2f));
-        // gap(1,4) indirect: the (last byte, byte four back) sparse pair + history.
-        let g14k = if self.pos >= 4 {
-            (c4 & 0xff) | ((self.b(self.pos - 4) as u32) << 8)
-        } else {
-            c4 & 0xffff
-        };
-        self.ctxhash[102] = hashk(
-            0x8800,
-            g14k ^ self.followg14[g14k as usize].wrapping_mul(0x85eb_ca6b),
-        );
-        // 8-byte char-class indirect: extends the char-class indirect to an
-        // 8-byte letter/digit/space/other pattern (text / source structure).
-        let cc8 = if self.pos >= 8 {
-            cls4(c4)
-                | (cls4(
-                    (self.b(self.pos - 5) as u32)
-                        | ((self.b(self.pos - 6) as u32) << 8)
-                        | ((self.b(self.pos - 7) as u32) << 16)
-                        | ((self.b(self.pos - 8) as u32) << 24),
-                ) << 8)
-        } else {
-            cls4(c4)
-        };
-        self.ctxhash[103] = hashk(
-            0x8900,
-            cc8 ^ self.followcc8[cc8 as usize].wrapping_mul(0xc2b2_ae35),
-        );
-        // Stride-5 indirect: the (pos-5, pos-10) pair plus its follow history.
-        let s5k = if self.pos >= 10 {
-            (self.b(self.pos - 5) as u32) | ((self.b(self.pos - 10) as u32) << 8)
-        } else {
-            c4 & 0xffff
-        };
-        self.ctxhash[104] = hashk(
-            0x8A00,
-            s5k ^ self.follows5[s5k as usize].wrapping_mul(0x27d4_eb2f),
-        );
-        // gap(1,6) indirect: the (last byte, byte six back) sparse pair + history.
-        let g16k = if self.pos >= 6 {
-            (c4 & 0xff) | ((self.b(self.pos - 6) as u32) << 8)
-        } else {
-            c4 & 0xffff
-        };
-        self.ctxhash[105] = hashk(
-            0x8B00,
-            g16k ^ self.followg16[g16k as usize].wrapping_mul(0x9e37_79b1),
         );
     }
 
