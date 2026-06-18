@@ -81,6 +81,7 @@ Leaderboard of recorded submissions. Full narratives live in
 | 0074 | 2026-06-17 | @10d9e | 572423 | 0 bytes, -350612885 WORK (new record) | +17.24% | `3b0fdea` | [0074](history/entries/0074--10d9e.md) | Output-neutral WORK reduction in the Context Tree Weighting model. The depth-48 … |
 | 0075 | 2026-06-17 | @10d9e | 572423 | 0 bytes, -201434556 WORK (new record) | +17.24% | `d4bcf54` | [0075](history/entries/0075--10d9e.md) | Output-neutral WORK and MEMCOST reduction in the Context Tree Weighting model. U… |
 | 0076 | 2026-06-18 | @10d9e | 575829 | +3406 | +16.75% | `76d585a` | [0076](history/entries/0076--10d9e.md) | Aggressive model trimming to explore the speed/size Pareto frontier. Removed CTW… |
+| 0077 | 2026-06-18 | @10d9e | 575394 | +2971 | +16.81% | `f2bea8e` | [0077](history/entries/0077--10d9e.md) | WORK/MEMCOST-neutral SCORE improvement over the lean non-winning entry 0076 (the… |
 
 **Current record: 572423** (@10d9e, entry 0075)
 
