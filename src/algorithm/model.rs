@@ -22,7 +22,7 @@ const CTW_IN: usize = 2 * NCTX + 8; // Context Tree Weighting prediction
 const NINPUT: usize = 2 * NCTX + 9;
 const TBITS: u32 = 20; // default per-model context-table size (2^TBITS slots)
 const MIXCTX: usize = 16384;
-const NL1: usize = 11; // perf trim 13->11
+const NL1: usize = 9; // perf trim 11->9
 const L1LR: i32 = 8; // layer-1 specialist learning rate
 const L2LR: i32 = 10; // layer-2 combiner learning rate
 const MIX3CTX: usize = 8192; // order-2 specialist rows
@@ -413,8 +413,6 @@ impl Cm {
             Mixer::new(NINPUT, 4096, q),
             Mixer::new(NINPUT, 8192, q),
             Mixer::new(NINPUT, 8192, q),
-            Mixer::new(NINPUT, 4096, q),
-            Mixer::new(NINPUT, 4096, q),
         ];
         let l2 = Mixer::new(NL1, 256, L2LR);
         let l2b = Mixer::new(NL1, 256, L2LR);
@@ -1324,19 +1322,17 @@ impl Cm {
         };
         self.l1[8].ctx = (ctx8) & (self.l1[8].nctx - 1);
         // stride-2 sparse selector: bytes at pos-2 and pos-4 (interleaved structure).
-        let ctx9 = if self.pos >= 4 {
+        let _ctx9 = if self.pos >= 4 {
             (self.b(self.pos - 2) as usize) | ((self.b(self.pos - 4) as usize) << 8)
         } else {
             self.c1 as usize
         };
-        self.l1[9].ctx = (ctx9) & (self.l1[9].nctx - 1);
         // stride-3 sparse selector: bytes at pos-3 and pos-6.
-        let ctx10 = if self.pos >= 6 {
+        let _ctx10 = if self.pos >= 6 {
             (self.b(self.pos - 3) as usize) | ((self.b(self.pos - 6) as usize) << 8)
         } else {
             self.c1 as usize
         };
-        self.l1[10].ctx = (ctx10) & (self.l1[10].nctx - 1);
         // byte-above selector (2D structure): specialise on the char one line up.
         let _ctx11 = (self.above_byte as usize) | ((self.c1 as usize & 1) << 9);
         // specialise on the order-2 indirect prediction (the byte that most
