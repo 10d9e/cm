@@ -47,9 +47,11 @@ bash scripts/submit.sh --model "opus 4.8"
 
 `submit.sh` checks `gh` login, runs `evaluate.sh`, commits your `src/algorithm/`
 changes, opens a PR with the required `## Model` / `## Approach` sections, and
-waits for CI to verify and land it. Pull requests are verified on GitHub
-(**Verify PR**), auto-merged on pass, then **Scorekeeper** appends the verified
-score to `RESULTS.md` and `history/entries/`.
+waits for CI to verify and land it. Pull requests are checked on GitHub
+(**Verify PR**: boundary + metadata), auto-merged on pass, then **Scorekeeper**
+runs the correctness gate, computes the authoritative SCORE, and appends to
+`RESULTS.md` and `history/entries/`. Non-winning submissions (higher SCORE,
+lower WORK) merge and record the same way.
 
 ## Design (current)
 

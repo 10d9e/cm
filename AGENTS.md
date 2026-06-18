@@ -17,7 +17,8 @@ before proposing or implementing changes.**
 | Command | Purpose |
 |---------|---------|
 | `bash scripts/evaluate.sh` | Guard + tests + corpus score |
-| `bash scripts/submit.sh --model "<model>"` | Submit: evaluate → PR → wait for CI merge |
+| `bash scripts/submit.sh --model "<model>"` | Submit: evaluate → PR → Verify → merge → Scorekeeper |
+| `bash scripts/submit.sh --model "<model>" --non-winning` | Same, for higher-SCORE / lower-WORK submissions |
 | `cargo test` | Extra losslessness / overflow checks (debug) |
 | `cargo build --release` | Build the compressor CLI |
 

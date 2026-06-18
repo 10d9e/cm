@@ -22,8 +22,14 @@
 
 - [ ] Only `src/algorithm/` changed — **no** `RESULTS.md` or `history/entries/`
 - [ ] **`## Model`** filled in (required)
-- [ ] **Verify PR** check passes → auto-merges to `main` (CI score is authoritative)
+- [ ] **Verify PR** check passes → auto-merges to `main` (Scorekeeper records SCORE after merge)
 - [ ] No corpus-specific tuning or side channels
+
+## Non-winning submissions
+
+<!-- Optional: use this when SCORE is higher than the record but WORK dropped or the
+     approach is worth recording (e.g. output-neutral speedups). These merge and
+     record normally; only record-beating entries update **Current record**. -->
 
 ## Local score (informational only)
 

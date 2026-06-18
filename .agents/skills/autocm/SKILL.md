@@ -108,13 +108,18 @@ push the branch or open the PR by hand:
 ```bash
 git checkout -b improve/<name>          # work on a feature branch, not main
 bash scripts/submit.sh --model "<model>"
+# output-neutral WORK wins at the record SCORE (or exploratory speed work):
+bash scripts/submit.sh --model "<model>" --non-winning
 ```
 
 `submit.sh` is the only supported submission path. It verifies `gh` login, runs
 `evaluate.sh`, commits your `src/algorithm/` changes, opens a PR with the
 required `## Model` and `## Approach` sections, and waits for CI to verify and
-auto-merge it to `main`. Pass `--approach`/`--notes` to fill the history entry,
-or let it default to your commit messages.
+auto-merge it to `main`. **Verify PR** checks boundary + metadata only;
+**Scorekeeper** runs the correctness gate and authoritative SCORE after merge.
+Non-winning submissions (higher SCORE, lower WORK) merge and record normally.
+Pass `--approach`/`--notes` to fill the history entry, or let it default to your
+commit messages.
 
 For PR workflow and CI rules, see [`CONTRIBUTING.md`](../../CONTRIBUTING.md).
 
