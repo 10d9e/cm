@@ -64,24 +64,6 @@ fn hashk(h: u32, x: u32) -> u32 {
     h.wrapping_add(x).wrapping_add(1).wrapping_mul(2654435761)
 }
 
-/// Pack the letter/digit/space/other class (2 bits each) of the four bytes in
-/// `c4` into an 8-bit signature (0..255).
-#[inline]
-fn cls4(c4: u32) -> u32 {
-    let cl = |b: u32| -> u32 {
-        let b = b & 0xff;
-        if (b >= 97 && b <= 122) || (b >= 65 && b <= 90) {
-            1
-        } else if b >= 48 && b <= 57 {
-            2
-        } else if b == 32 || b == 9 || b == 10 || b == 13 {
-            3
-        } else {
-            0
-        }
-    };
-    cl(c4) | (cl(c4 >> 8) << 2) | (cl(c4 >> 16) << 4) | (cl(c4 >> 24) << 6)
-}
 
 /// Nonstationary bit-history state transition. The state byte packs two bounded
 /// counts (n0 in the high nibble, n1 in the low nibble, each 0..15). On each
@@ -308,24 +290,6 @@ pub struct Cm {
     follow2: Vec<u32>,   // [65536] packed recent bytes that followed each order-2 ctx
     follow3: Vec<u32>,   // [FSIZE] hashed: bytes that followed each order-3 ctx
     follow4: Vec<u32>,   // [FSIZE] hashed: bytes that followed each order-4 ctx
-    follow5: Vec<u32>,   // [FSIZE] hashed: bytes that followed each order-5 ctx
-    follow6: Vec<u32>,   // [FSIZE] hashed: bytes that followed each order-6 ctx
-    followhn: Vec<u32>,  // [FSIZE] hashed: bytes that followed each high-nibble ctx
-    followd: Vec<u32>,   // [FSIZE] hashed: bytes that followed each byte-delta ctx
-    followc: Vec<u32>,   // [256] bytes that followed each char-class ctx
-    followln: Vec<u32>,  // [FSIZE] hashed: bytes that followed each low-nibble ctx
-    followg: Vec<u32>,   // [65536] bytes that followed each gap-bigram ctx
-    follows2: Vec<u32>,  // [65536] bytes that followed each stride-2 ctx
-    follows3: Vec<u32>,  // [65536] bytes that followed each stride-3 ctx
-    followg2: Vec<u32>,  // [65536] bytes that followed each wide-gap ctx
-    followhn8: Vec<u32>, // [FSIZE] bytes that followed each 8-byte high-nibble ctx
-    follows4: Vec<u32>,  // [65536] bytes that followed each stride-4 ctx
-    followln8: Vec<u32>, // [FSIZE] bytes that followed each 8-byte low-nibble ctx
-    followg14: Vec<u32>, // [65536] bytes that followed each gap(1,4) ctx
-    followcc8: Vec<u32>, // [65536] bytes that followed each 8-byte char-class ctx
-    follows5: Vec<u32>,  // [65536] bytes that followed each stride-5 ctx
-    followg16: Vec<u32>, // [65536] bytes that followed each gap(1,6) ctx
-    followw: Vec<u32>,   // [65536] hashed: bytes that followed each word prefix
 }
 
 impl Cm {
@@ -543,24 +507,6 @@ impl Cm {
             follow2: vec![0u32; 65536],
             follow3: vec![0u32; FSIZE],
             follow4: vec![0u32; FSIZE],
-            follow5: vec![0u32; FSIZE],
-            follow6: vec![0u32; FSIZE],
-            followhn: vec![0u32; FSIZE],
-            followd: vec![0u32; FSIZE],
-            followc: vec![0u32; 256],
-            followln: vec![0u32; FSIZE],
-            followg: vec![0u32; 65536],
-            follows2: vec![0u32; 65536],
-            follows3: vec![0u32; 65536],
-            followg2: vec![0u32; 65536],
-            followhn8: vec![0u32; FSIZE],
-            follows4: vec![0u32; 65536],
-            followln8: vec![0u32; FSIZE],
-            followg14: vec![0u32; 65536],
-            followcc8: vec![0u32; 65536],
-            follows5: vec![0u32; 65536],
-            followg16: vec![0u32; 65536],
-            followw: vec![0u32; 65536],
         }
     }
 
@@ -1856,116 +1802,6 @@ impl Cm {
             self.follow3[ic3] = (self.follow3[ic3] << 8) | byte as u32;
             let ic4 = (self.c4.wrapping_mul(0x85eb_ca6b) >> (32 - FBITS)) as usize;
             self.follow4[ic4] = (self.follow4[ic4] << 8) | byte as u32;
-            if self.pos >= 5 {
-                let m5 = self.c4.wrapping_mul(0x9e37_79b1)
-                    ^ (self.b(self.pos - 5) as u32).wrapping_mul(0x85eb_ca6b);
-                let k5 = (m5 >> (32 - FBITS)) as usize;
-                self.follow5[k5] = (self.follow5[k5] << 8) | byte as u32;
-            }
-            if self.pos >= 6 {
-                let m6 = self.c4.wrapping_mul(0x85eb_ca6b)
-                    ^ (self.b(self.pos - 5) as u32).wrapping_mul(0xc2b2_ae35)
-                    ^ (self.b(self.pos - 6) as u32).wrapping_mul(0x27d4_eb2f);
-                let k6 = (m6 >> (32 - FBITS)) as usize;
-                self.follow6[k6] = (self.follow6[k6] << 8) | byte as u32;
-            }
-            {
-                let hnm = (self.c4 & 0xf0f0_f0f0).wrapping_mul(0x9e37_79b1);
-                let khn = (hnm >> (32 - FBITS)) as usize;
-                self.followhn[khn] = (self.followhn[khn] << 8) | byte as u32;
-                let dd1 = (self.c4 & 0xff).wrapping_sub((self.c4 >> 8) & 0xff) & 0xff;
-                let dd2 = ((self.c4 >> 8) & 0xff).wrapping_sub((self.c4 >> 16) & 0xff) & 0xff;
-                let dd3 = ((self.c4 >> 16) & 0xff).wrapping_sub((self.c4 >> 24) & 0xff) & 0xff;
-                let dm = (dd1 | (dd2 << 8) | (dd3 << 16)).wrapping_mul(0x85eb_ca6b);
-                let kd = (dm >> (32 - FBITS)) as usize;
-                self.followd[kd] = (self.followd[kd] << 8) | byte as u32;
-                let cck = cls4(self.c4) as usize;
-                self.followc[cck] = (self.followc[cck] << 8) | byte as u32;
-                let lnm = (self.c4 & 0x0f0f_0f0f).wrapping_mul(0xc2b2_ae35);
-                let kln = (lnm >> (32 - FBITS)) as usize;
-                self.followln[kln] = (self.followln[kln] << 8) | byte as u32;
-                let gk = if self.pos >= 3 {
-                    (self.c4 & 0xff) | ((self.b(self.pos - 3) as u32) << 8)
-                } else {
-                    self.c4 & 0xffff
-                } as usize;
-                self.followg[gk] = (self.followg[gk] << 8) | byte as u32;
-                let sk = if self.pos >= 4 {
-                    (self.b(self.pos - 2) as u32) | ((self.b(self.pos - 4) as u32) << 8)
-                } else {
-                    self.c4 & 0xffff
-                } as usize;
-                self.follows2[sk] = (self.follows2[sk] << 8) | byte as u32;
-                let s3k = if self.pos >= 6 {
-                    (self.b(self.pos - 3) as u32) | ((self.b(self.pos - 6) as u32) << 8)
-                } else {
-                    self.c4 & 0xffff
-                } as usize;
-                self.follows3[s3k] = (self.follows3[s3k] << 8) | byte as u32;
-                let g2k = if self.pos >= 5 {
-                    (self.c4 & 0xff) | ((self.b(self.pos - 5) as u32) << 8)
-                } else {
-                    self.c4 & 0xffff
-                } as usize;
-                self.followg2[g2k] = (self.followg2[g2k] << 8) | byte as u32;
-                let hn8 = if self.pos >= 8 {
-                    hnm ^ ((self.b(self.pos - 5) as u32 & 0xf0) << 4)
-                        ^ ((self.b(self.pos - 6) as u32 & 0xf0) << 12)
-                        ^ ((self.b(self.pos - 7) as u32 & 0xf0) << 20)
-                        ^ ((self.b(self.pos - 8) as u32 & 0xf0).wrapping_mul(0x85eb_ca6b))
-                } else {
-                    hnm
-                };
-                let khn8 = (hn8 >> (32 - FBITS)) as usize;
-                self.followhn8[khn8] = (self.followhn8[khn8] << 8) | byte as u32;
-                let s4k = if self.pos >= 8 {
-                    (self.b(self.pos - 4) as u32) | ((self.b(self.pos - 8) as u32) << 8)
-                } else {
-                    self.c4 & 0xffff
-                } as usize;
-                self.follows4[s4k] = (self.follows4[s4k] << 8) | byte as u32;
-                let ln8 = if self.pos >= 8 {
-                    (self.c4 & 0x0f0f_0f0f).wrapping_mul(0xc2b2_ae35)
-                        ^ ((self.b(self.pos - 5) as u32 & 0x0f) << 4)
-                        ^ ((self.b(self.pos - 6) as u32 & 0x0f) << 12)
-                        ^ ((self.b(self.pos - 7) as u32 & 0x0f) << 20)
-                        ^ ((self.b(self.pos - 8) as u32 & 0x0f).wrapping_mul(0x9e37_79b1))
-                } else {
-                    (self.c4 & 0x0f0f_0f0f).wrapping_mul(0xc2b2_ae35)
-                };
-                let kln8 = (ln8 >> (32 - FBITS)) as usize;
-                self.followln8[kln8] = (self.followln8[kln8] << 8) | byte as u32;
-                let g14k = if self.pos >= 4 {
-                    (self.c4 & 0xff) | ((self.b(self.pos - 4) as u32) << 8)
-                } else {
-                    self.c4 & 0xffff
-                } as usize;
-                self.followg14[g14k] = (self.followg14[g14k] << 8) | byte as u32;
-                let cc8 = if self.pos >= 8 {
-                    cls4(self.c4)
-                        | (cls4(
-                            (self.b(self.pos - 5) as u32)
-                                | ((self.b(self.pos - 6) as u32) << 8)
-                                | ((self.b(self.pos - 7) as u32) << 16)
-                                | ((self.b(self.pos - 8) as u32) << 24),
-                        ) << 8)
-                } else {
-                    cls4(self.c4)
-                } as usize;
-                self.followcc8[cc8] = (self.followcc8[cc8] << 8) | byte as u32;
-                let s5k = if self.pos >= 10 {
-                    (self.b(self.pos - 5) as u32) | ((self.b(self.pos - 10) as u32) << 8)
-                } else {
-                    self.c4 & 0xffff
-                } as usize;
-                self.follows5[s5k] = (self.follows5[s5k] << 8) | byte as u32;
-                let g16k = if self.pos >= 6 {
-                    (self.c4 & 0xff) | ((self.b(self.pos - 6) as u32) << 8)
-                } else {
-                    self.c4 & 0xffff
-                } as usize;
-                self.followg16[g16k] = (self.followg16[g16k] << 8) | byte as u32;
-            }
             let bp = (self.pos & self.bufmask) as usize;
             self.buf[bp] = byte;
             self.pos += 1;
@@ -2019,9 +1855,6 @@ impl Cm {
                 self.rlen = d;
                 self.rcount = 1;
             }
-            // Word-indirect: record that `byte` followed the current word prefix.
-            let wk = (self.wordhash.wrapping_mul(0x9e37_79b1) >> 16) as usize;
-            self.followw[wk] = (self.followw[wk] << 8) | byte as u32;
             if (byte >= b'a' && byte <= b'z')
                 || (byte >= b'A' && byte <= b'Z')
                 || (byte >= b'0' && byte <= b'9')
