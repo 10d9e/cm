@@ -23,8 +23,8 @@ const NINPUT: usize = 2 * NCTX + 9;
 const TBITS: u32 = 20; // default per-model context-table size (2^TBITS slots)
 const MIXCTX: usize = 16384;
 const NL1: usize = 12; // PERF: trimmed from 27 (dropped 15 lower-value specialists)
-const L1LR: i32 = 8; // layer-1 specialist learning rate
-const L2LR: i32 = 10; // layer-2 combiner learning rate
+const L1LR: i32 = 10; // layer-1 specialist learning rate
+const L2LR: i32 = 16; // layer-2 combiner learning rate
 const MIX3CTX: usize = 8192; // order-2 specialist rows
 const MIX4CTX: usize = 8192; // order-3 specialist rows
 const FBITS: u32 = 23; // indirect order-3/-4/-5/-6 follow-history hash table bits
@@ -441,42 +441,42 @@ impl Cm {
             matchptr: 0,
             matchlen: 0,
             predicted_byte: -1,
-            mm_sm: [2048; 80],
+            mm_sm: [32768; 80],
             mm_used: false,
             mm_idx: 0,
             mmtab2: vec![0u32; MMSIZE2],
             matchptr2: 0,
             matchlen2: 0,
             predicted_byte2: -1,
-            mm_sm2: [2048; 80],
+            mm_sm2: [32768; 80],
             mm_used2: false,
             mm_idx2: 0,
             mmtab3: vec![0u32; MMSIZE3],
             matchptr3: 0,
             matchlen3: 0,
             predicted_byte3: -1,
-            mm_sm3: [2048; 184],
+            mm_sm3: [32768; 184],
             mm_used3: false,
             mm_idx3: 0,
             mmtab4: vec![0u32; MMSIZE4],
             matchptr4: 0,
             matchlen4: 0,
             predicted_byte4: -1,
-            mm_sm4: [2048; 160],
+            mm_sm4: [32768; 160],
             mm_used4: false,
             mm_idx4: 0,
             mmtab5: vec![0u32; MMSIZE5],
             matchptr5: 0,
             matchlen5: 0,
             predicted_byte5: -1,
-            mm_sm5: [2048; 160],
+            mm_sm5: [32768; 160],
             mm_used5: false,
             mm_idx5: 0,
             mmtab6: vec![0u32; MMSIZE6],
             matchptr6: 0,
             matchlen6: 0,
             predicted_byte6: -1,
-            mm_sm6: [2048; 80],
+            mm_sm6: [32768; 80],
             mm_used6: false,
             mm_idx6: 0,
             apm1,
@@ -1109,12 +1109,12 @@ impl Cm {
             // stretch has 4096 entries; cp+2048 is in [0,4095] (the counter is a
             // contraction toward [0,4095]) and sm>>20 is a 12-bit value, so both
             // indices are always valid — skip the bounds check.
-            self.mix_in[i] = unsafe { *self.stretch.get_unchecked((slot.cp as i32 + 2048) as usize) };
+            self.mix_in[i] = unsafe { *self.stretch16.get_unchecked((slot.cp as i32 + 32768) as usize) };
             let mi = (slot.st as usize) | ((self.bitcount as usize) << 8);
             self.sm_idx[i] = mi;
             // mi <= 2047 by construction (st <= 255 | bitcount<3-bit> << 8).
-            let smp = (unsafe { self.sm.get_unchecked(i) }[mi & 2047] >> 20) as usize;
-            self.mix_in[SM_BASE + i] = unsafe { *self.stretch.get_unchecked(smp) };
+            let smp = (unsafe { self.sm.get_unchecked(i) }[mi & 2047] >> 16) as usize;
+            self.mix_in[SM_BASE + i] = unsafe { *self.stretch16.get_unchecked(smp) };
         }
         self.mm_used = false;
         self.mix_in[MM_BASE] = 0;
@@ -1128,7 +1128,7 @@ impl Cm {
                     self.matchlen
                 };
                 self.mm_idx = ((li << 1) | expected_bit) as usize;
-                self.mix_in[MM_BASE] = unsafe { *self.stretch.get_unchecked(*self.mm_sm.get_unchecked(self.mm_idx) as usize) };
+                self.mix_in[MM_BASE] = unsafe { *self.stretch16.get_unchecked(*self.mm_sm.get_unchecked(self.mm_idx) as usize) };
                 self.mm_used = true;
             } else {
                 self.matchlen = 0;
@@ -1146,7 +1146,7 @@ impl Cm {
                     self.matchlen2
                 };
                 self.mm_idx2 = ((li << 1) | expected_bit) as usize;
-                self.mix_in[MM_BASE + 1] = unsafe { *self.stretch.get_unchecked(*self.mm_sm2.get_unchecked(self.mm_idx2) as usize) };
+                self.mix_in[MM_BASE + 1] = unsafe { *self.stretch16.get_unchecked(*self.mm_sm2.get_unchecked(self.mm_idx2) as usize) };
                 self.mm_used2 = true;
             } else {
                 self.matchlen2 = 0;
@@ -1164,7 +1164,7 @@ impl Cm {
                     self.matchlen3
                 };
                 self.mm_idx3 = ((li << 1) | expected_bit) as usize;
-                self.mix_in[MM_BASE + 2] = unsafe { *self.stretch.get_unchecked(*self.mm_sm3.get_unchecked(self.mm_idx3) as usize) };
+                self.mix_in[MM_BASE + 2] = unsafe { *self.stretch16.get_unchecked(*self.mm_sm3.get_unchecked(self.mm_idx3) as usize) };
                 self.mm_used3 = true;
             } else {
                 self.matchlen3 = 0;
@@ -1182,7 +1182,7 @@ impl Cm {
                     self.matchlen4
                 };
                 self.mm_idx4 = ((li << 1) | expected_bit) as usize;
-                self.mix_in[MM_BASE + 3] = unsafe { *self.stretch.get_unchecked(*self.mm_sm4.get_unchecked(self.mm_idx4) as usize) };
+                self.mix_in[MM_BASE + 3] = unsafe { *self.stretch16.get_unchecked(*self.mm_sm4.get_unchecked(self.mm_idx4) as usize) };
                 self.mm_used4 = true;
             } else {
                 self.matchlen4 = 0;
@@ -1200,7 +1200,7 @@ impl Cm {
                     self.matchlen5
                 };
                 self.mm_idx5 = ((li << 1) | expected_bit) as usize;
-                self.mix_in[MM_BASE + 4] = unsafe { *self.stretch.get_unchecked(*self.mm_sm5.get_unchecked(self.mm_idx5) as usize) };
+                self.mix_in[MM_BASE + 4] = unsafe { *self.stretch16.get_unchecked(*self.mm_sm5.get_unchecked(self.mm_idx5) as usize) };
                 self.mm_used5 = true;
             } else {
                 self.matchlen5 = 0;
@@ -1218,7 +1218,7 @@ impl Cm {
                     self.matchlen6
                 };
                 self.mm_idx6 = ((li << 1) | expected_bit) as usize;
-                self.mix_in[MM_BASE + 5] = unsafe { *self.stretch.get_unchecked(*self.mm_sm6.get_unchecked(self.mm_idx6) as usize) };
+                self.mix_in[MM_BASE + 5] = unsafe { *self.stretch16.get_unchecked(*self.mm_sm6.get_unchecked(self.mm_idx6) as usize) };
                 self.mm_used6 = true;
             } else {
                 self.matchlen6 = 0;
@@ -1620,7 +1620,7 @@ impl Cm {
 
     #[inline]
     pub fn update(&mut self, bit: i32, _p: i32) {
-        let t = if bit != 0 { 4095 } else { 0 };
+        let t = if bit != 0 { 65535 } else { 0 };
         self.apm1.update(bit);
         self.apm2.update(bit);
         self.apm3.update(bit);
@@ -1630,27 +1630,27 @@ impl Cm {
         // PERF: CTW removed (was self.ctw.update(bit))
         if self.mm_used {
             let v = self.mm_sm[self.mm_idx] as i32;
-            self.mm_sm[self.mm_idx] = (v + (((if bit != 0 { 4095 } else { 0 }) - v) >> 6)) as u16;
+            self.mm_sm[self.mm_idx] = (v + (((if bit != 0 { 65535 } else { 0 }) - v) >> 6)) as u16;
         }
         if self.mm_used2 {
             let v = self.mm_sm2[self.mm_idx2] as i32;
-            self.mm_sm2[self.mm_idx2] = (v + (((if bit != 0 { 4095 } else { 0 }) - v) >> 6)) as u16;
+            self.mm_sm2[self.mm_idx2] = (v + (((if bit != 0 { 65535 } else { 0 }) - v) >> 6)) as u16;
         }
         if self.mm_used3 {
             let v = self.mm_sm3[self.mm_idx3] as i32;
-            self.mm_sm3[self.mm_idx3] = (v + (((if bit != 0 { 4095 } else { 0 }) - v) >> 5)) as u16;
+            self.mm_sm3[self.mm_idx3] = (v + (((if bit != 0 { 65535 } else { 0 }) - v) >> 5)) as u16;
         }
         if self.mm_used4 {
             let v = self.mm_sm4[self.mm_idx4] as i32;
-            self.mm_sm4[self.mm_idx4] = (v + (((if bit != 0 { 4095 } else { 0 }) - v) >> 1)) as u16;
+            self.mm_sm4[self.mm_idx4] = (v + (((if bit != 0 { 65535 } else { 0 }) - v) >> 1)) as u16;
         }
         if self.mm_used5 {
             let v = self.mm_sm5[self.mm_idx5] as i32;
-            self.mm_sm5[self.mm_idx5] = (v + (((if bit != 0 { 4095 } else { 0 }) - v) >> 5)) as u16;
+            self.mm_sm5[self.mm_idx5] = (v + (((if bit != 0 { 65535 } else { 0 }) - v) >> 5)) as u16;
         }
         if self.mm_used6 {
             let v = self.mm_sm6[self.mm_idx6] as i32;
-            self.mm_sm6[self.mm_idx6] = (v + (((if bit != 0 { 4095 } else { 0 }) - v) >> 5)) as u16;
+            self.mm_sm6[self.mm_idx6] = (v + (((if bit != 0 { 65535 } else { 0 }) - v) >> 5)) as u16;
         }
         // Fused layer-1 weight update (mirror of the fused dot in `predict`): all
         // 27 specialists train on the same input vector, so load each mix_in[i]
@@ -1717,8 +1717,8 @@ impl Cm {
             // i < NCTX and ix is the in-range slot index chosen in `predict`.
             let slot = unsafe { self.tab.get_unchecked_mut(i).get_unchecked_mut(ix) };
             let n = slot.cn as i32;
-            let pr = slot.cp as i32 + 2048;
-            slot.cp = ((pr + (((t - pr) * self.rate_tab[n as usize]) >> 12)) - 2048) as i16;
+            let pr = slot.cp as i32 + 32768;
+            slot.cp = ((pr + (((t - pr) * self.rate_tab[n as usize]) >> 12)) - 32768) as i16;
             if n < CNT_LIMIT {
                 slot.cn = (n + 1) as u8;
             }
