@@ -18,21 +18,33 @@ fi
 
 violations=()
 has_algorithm=0
+has_ci=0
 while IFS= read -r f; do
   [[ -z "$f" ]] && continue
   case "$f" in
     src/algorithm/*) has_algorithm=1 ;;
     docs/*|scripts/build-leaderboard.py|scripts/guard-pr.sh) ;;
+    # CI / workflow / infra changes (maintainer PRs): allowed on their own, but
+    # NEVER combined with a src/algorithm submission — a submission must not be
+    # able to edit the verify/scorekeeper workflows or scoring/metering scripts.
+    .github/*|scripts/*) has_ci=1 ;;
     *) violations+=("$f") ;;
   esac
 done < <(git diff --name-only "$base"...HEAD)
 
 if (( ${#violations[@]} )); then
   echo "PR BOUNDARY VIOLATION — submissions may only change src/algorithm/;"
-  echo "leaderboard/site PRs may only change docs/ or scripts/build-leaderboard.py:"
+  echo "leaderboard/site PRs may only change docs/ or scripts/build-leaderboard.py;"
+  echo "CI/infra PRs may only change .github/ or scripts/:"
   printf '  %s\n' "${violations[@]}"
   echo
   echo "Do not commit RESULTS.md or history/entries/ — CI records the score on merge."
+  exit 1
+fi
+
+if (( has_algorithm && has_ci )); then
+  echo "PR BOUNDARY VIOLATION — CI/infra changes (.github/ or scripts/) may not be"
+  echo "combined with a src/algorithm submission; submit them as separate PRs."
   exit 1
 fi
 
