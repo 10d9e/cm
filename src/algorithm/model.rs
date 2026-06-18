@@ -22,7 +22,7 @@ const CTW_IN: usize = 2 * NCTX + 8; // Context Tree Weighting prediction
 const NINPUT: usize = 2 * NCTX + 9;
 const TBITS: u32 = 20; // default per-model context-table size (2^TBITS slots)
 const MIXCTX: usize = 16384;
-const NL1: usize = 16; // perf trim 19->16
+const NL1: usize = 13; // perf trim 16->13
 const L1LR: i32 = 8; // layer-1 specialist learning rate
 const L2LR: i32 = 10; // layer-2 combiner learning rate
 const MIX3CTX: usize = 8192; // order-2 specialist rows
@@ -416,9 +416,6 @@ impl Cm {
             Mixer::new(NINPUT, 4096, q),
             Mixer::new(NINPUT, 4096, q),
             Mixer::new(NINPUT, 512, q),
-            Mixer::new(NINPUT, 256, q),
-            Mixer::new(NINPUT, 1024, q),
-            Mixer::new(NINPUT, 4096, q),
             Mixer::new(NINPUT, 256, q),
         ];
         let l2 = Mixer::new(NL1, 256, L2LR);
@@ -1575,15 +1572,13 @@ impl Cm {
         // recently followed this 2-byte context).
         self.l1[12].ctx = (self.ind_pred as usize) & (self.l1[12].nctx - 1);
         // nest-state selector: specialise on the enclosing bracket + nesting depth.
-        let nestsel = if self.nest_depth > 0 {
+        let _nestsel = if self.nest_depth > 0 {
             (self.nest_stack[self.nest_depth - 1] as usize) | ((self.nest_depth & 3) << 8)
         } else {
             0
         };
-        self.l1[13].ctx = (nestsel) & (self.l1[13].nctx - 1);
         // high-nibble (opcode-class) selector.
-        let hnsel = ((self.c4 & 0xf0f0_f0f0).wrapping_mul(0x9e37_79b1) >> 20) as usize;
-        self.l1[14].ctx = (hnsel) & (self.l1[14].nctx - 1);
+        let _hnsel = ((self.c4 & 0xf0f0_f0f0).wrapping_mul(0x9e37_79b1) >> 20) as usize;
         // character-class selector (letter/digit/space/other of last 4 bytes) —
         // a coarse semantic text-mode grouping (analogous to the high-nibble one).
         let cls = |b: u32| -> usize {
@@ -1598,11 +1593,10 @@ impl Cm {
                 0
             }
         };
-        let ccsel = cls(self.c4)
+        let _ccsel = cls(self.c4)
             | (cls(self.c4 >> 8) << 2)
             | (cls(self.c4 >> 16) << 4)
             | (cls(self.c4 >> 24) << 6);
-        self.l1[15].ctx = (ccsel) & (self.l1[15].nctx - 1);
         // combined mode selector: last byte's high nibble + char-class of the
         // last two bytes (a richer visual+semantic mode than either alone).
         let _modesel =
