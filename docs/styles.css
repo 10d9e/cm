@@ -342,6 +342,12 @@ table.leaderboard tbody tr.non-winning td.c-id {
   font-variant-numeric: tabular-nums;
 }
 
+.c-author {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .c-author .avatar {
   width: 22px;
   height: 22px;
@@ -349,15 +355,17 @@ table.leaderboard tbody tr.non-winning td.c-id {
   border: 0.5px solid rgba(255, 255, 255, 0.12);
   background: rgba(255, 255, 255, 0.04);
   object-fit: cover;
-  vertical-align: middle;
-  margin-right: 8px;
+  flex-shrink: 0;
 }
 
 .c-author .aname {
   color: rgba(255, 255, 255, 0.78);
   font-weight: 500;
   font-size: 11px;
-  vertical-align: middle;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .c-model {
@@ -374,12 +382,6 @@ table.leaderboard tbody tr.non-winning td.c-id {
   color: #fff;
 }
 
-.c-score-leader {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-}
-
 .score-crown {
   display: inline-flex;
   align-items: center;
@@ -393,7 +395,7 @@ table.leaderboard tbody tr.non-winning td.c-id {
   display: block;
 }
 
-table.leaderboard tbody tr.score-leader td.c-score {
+table.leaderboard tbody tr.score-leader td.c-author .aname {
   color: #fff;
 }
 
