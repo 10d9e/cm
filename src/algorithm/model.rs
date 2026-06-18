@@ -64,25 +64,6 @@ fn hashk(h: u32, x: u32) -> u32 {
     h.wrapping_add(x).wrapping_add(1).wrapping_mul(2654435761)
 }
 
-/// Pack the letter/digit/space/other class (2 bits each) of the four bytes in
-/// `c4` into an 8-bit signature (0..255).
-#[inline]
-fn cls4(c4: u32) -> u32 {
-    let cl = |b: u32| -> u32 {
-        let b = b & 0xff;
-        if (b >= 97 && b <= 122) || (b >= 65 && b <= 90) {
-            1
-        } else if b >= 48 && b <= 57 {
-            2
-        } else if b == 32 || b == 9 || b == 10 || b == 13 {
-            3
-        } else {
-            0
-        }
-    };
-    cl(c4) | (cl(c4 >> 8) << 2) | (cl(c4 >> 16) << 4) | (cl(c4 >> 24) << 6)
-}
-
 /// Nonstationary bit-history state transition. The state byte packs two bounded
 /// counts (n0 in the high nibble, n1 in the low nibble, each 0..15). On each
 /// observed bit the matching count is incremented and the opposite count is
@@ -1309,13 +1290,13 @@ impl Cm {
         // specialise on the order-2 indirect prediction (the byte that most
         // recently followed this 2-byte context).
         // nest-state selector: specialise on the enclosing bracket + nesting depth.
-        let nestsel = if self.nest_depth > 0 {
+        let _nestsel = if self.nest_depth > 0 {
             (self.nest_stack[self.nest_depth - 1] as usize) | ((self.nest_depth & 3) << 8)
         } else {
             0
         };
         // high-nibble (opcode-class) selector.
-        let hnsel = ((self.c4 & 0xf0f0_f0f0).wrapping_mul(0x9e37_79b1) >> 20) as usize;
+        let _hnsel = ((self.c4 & 0xf0f0_f0f0).wrapping_mul(0x9e37_79b1) >> 20) as usize;
         // character-class selector (letter/digit/space/other of last 4 bytes) —
         // a coarse semantic text-mode grouping (analogous to the high-nibble one).
         let cls = |b: u32| -> usize {
@@ -1330,13 +1311,13 @@ impl Cm {
                 0
             }
         };
-        let ccsel = cls(self.c4)
+        let _ccsel = cls(self.c4)
             | (cls(self.c4 >> 8) << 2)
             | (cls(self.c4 >> 16) << 4)
             | (cls(self.c4 >> 24) << 6);
         // combined mode selector: last byte's high nibble + char-class of the
         // last two bytes (a richer visual+semantic mode than either alone).
-        let modesel =
+        let _modesel =
             ((self.c4 & 0xf0) >> 4) as usize | (cls(self.c4) << 4) | (cls(self.c4 >> 8) << 6);
         // run-length regime selector: bucket the current run length with the
         // class of the last byte — distinguishes "in a long run" from "varying".
@@ -1360,7 +1341,7 @@ impl Cm {
                 7
             }
         };
-        let runsel = runb | (cls(self.c4) << 3);
+        let _runsel = runb | (cls(self.c4) << 3);
         // gradient / delta-sign selector: coarse sign (zero/up/down) of the last
         // three consecutive byte differences — a "numeric trend" mode.
         let dsign = |a: u32, b: u32| -> usize {
@@ -1373,14 +1354,14 @@ impl Cm {
                 2
             }
         };
-        let gradsel = dsign(self.c4, self.c4 >> 8)
+        let _gradsel = dsign(self.c4, self.c4 >> 8)
             + 3 * dsign(self.c4 >> 8, self.c4 >> 16)
             + 9 * dsign(self.c4 >> 16, self.c4 >> 24);
         // periodic / record selector: when the period detector is confident,
         // specialise on the coarse value of the byte one period back.
         let rgl = self.rlen;
         let rec_ok_l = self.rcount > 8 && rgl >= 2 && rgl < self.pos;
-        let recsel = if rec_ok_l {
+        let _recsel = if rec_ok_l {
             1 + ((self.b(self.pos - rgl) as usize) >> 5)
         } else {
             0
@@ -1392,7 +1373,7 @@ impl Cm {
         } else {
             cls(self.above_byte)
         };
-        let abovesel = aboveclass | ((self.nest_depth & 7) << 3);
+        let _abovesel = aboveclass | ((self.nest_depth & 7) << 3);
         // gradient-magnitude selector: bucket the magnitude of the last byte
         // difference (flat / small / medium / large) with the last-byte class —
         // a smooth-vs-noisy numeric mode, distinct from the delta-sign selector.
@@ -1411,7 +1392,7 @@ impl Cm {
                 4
             }
         };
-        let gmagsel = dmag | (cls(self.c4) << 3);
+        let _gmagsel = dmag | (cls(self.c4) << 3);
         // vertical-repeat selector: whether the byte one line up equals the last
         // byte, combined with match activity and the last-byte class.
         let vrep = if self.above_byte <= 255 && self.above_byte == self.c1 as u32 {
@@ -1419,14 +1400,14 @@ impl Cm {
         } else {
             0
         };
-        let vrepsel = vrep | ((if self.matchlen > 0 { 1 } else { 0 }) << 1) | (cls(self.c4) << 2);
+        let _vrepsel = vrep | ((if self.matchlen > 0 { 1 } else { 0 }) << 1) | (cls(self.c4) << 2);
         // bit-position + match-state selector: the within-byte bit position
         // combined with whether a match is currently active.
-        let bmsel = (self.c0 as usize & 0x7f) | (if self.matchlen > 0 { 128 } else { 0 });
+        let _bmsel = (self.c0 as usize & 0x7f) | (if self.matchlen > 0 { 128 } else { 0 });
         // opcode-trigram selector: the high nibbles of the last three bytes — a
         // coarse instruction-class trigram (binary), distinct from the existing
         // single-nibble selector.
-        let optri = (((self.c4 >> 4) & 0xf)
+        let _optri = (((self.c4 >> 4) & 0xf)
             | (((self.c4 >> 12) & 0xf) << 2)
             | (((self.c4 >> 20) & 0xf) << 4)) as usize
             & 63;
@@ -1470,7 +1451,7 @@ impl Cm {
                 7
             }
         };
-        let wlsel = colb | (cls(self.c4) << 3);
+        let _wlsel = colb | (cls(self.c4) << 3);
         // Fused layer-1 dot products. All 27 specialists dot the *same* input
         // vector under their own (already-selected) weight row, so iterate the
         // inputs once — loading each mix_in64[i] a single time — and accumulate
