@@ -9,7 +9,7 @@
 use super::dmc::Dmc;
 use super::tables::{build, build16, squash16_d, squash_d};
 
-const NCTX: usize = 86; // perf trim 96->86
+const NCTX: usize = 81; // perf trim 86->81
                          // Mixer input layout:
                          //   [0 .. NCTX)            direct adaptive counters
                          //   [SM_BASE .. SM_BASE+NCTX) bit-history StateMap predictions (one per context)
@@ -1111,35 +1111,6 @@ impl Cm {
         );
         let j4 = (c4.wrapping_mul(0x85eb_ca6b) >> (32 - FBITS)) as usize;
         self.ctxhash[78] = hashk(0x6C00, c4 ^ self.follow4[j4].wrapping_mul(0x27d4_eb2f));
-        // Word-indirect: current word prefix + the bytes that have followed it.
-        self.ctxhash[81] = if self.wordhash != 0 {
-            let wk = (self.wordhash.wrapping_mul(0x9e37_79b1) >> 16) as usize;
-            hashk(
-                0x7000,
-                self.wordhash ^ self.followw[wk].wrapping_mul(0xc2b2_ae35),
-            )
-        } else {
-            0
-        };
-        // Run model: last byte + the length of its current run (capped). Models
-        // run continuation/termination (zero-runs in binary, repeated chars).
-        self.ctxhash[82] = hashk(0x7100, (c4 & 0xff) | (self.run_len.min(255) << 8));
-        // Nesting model: predict from bracket-nesting depth and the enclosing
-        // bracket — captures the ()[]{} structure pervasive in source code.
-        let last_open = if self.nest_depth > 0 {
-            self.nest_stack[self.nest_depth - 1] as u32
-        } else {
-            0
-        };
-        self.ctxhash[83] = hashk(0x7200, (self.nest_depth as u32 & 31) | ((c4 & 0xff) << 5));
-        self.ctxhash[84] = hashk(0x7300, last_open | ((c4 & 0xff) << 8));
-        // enclosing bracket + nesting depth + order-2 context (finer structure)
-        self.ctxhash[85] = hashk(
-            0x7400,
-            last_open.wrapping_mul(0x9e37_79b1)
-                ^ ((self.nest_depth as u32 & 31) << 16)
-                ^ (c4 & 0xffff),
-        );
     }
 
     #[inline]
