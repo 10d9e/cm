@@ -96,16 +96,42 @@ function renderStats(data) {
   ].join("");
 }
 
+function runningRecordFrontier(entries) {
+  let bestScore = Infinity;
+  let bestWork = Infinity;
+  return entries.map((e) => {
+    if (e.score == null) return null;
+    const work = e.work ?? Number.POSITIVE_INFINITY;
+    if (e.score < bestScore || (e.score === bestScore && work < bestWork)) {
+      bestScore = e.score;
+      bestWork = work;
+    }
+    return bestScore === Infinity ? null : bestScore;
+  });
+}
+
+function submissionPointStyle(e) {
+  if (e.isRecord) {
+    return { radius: 5, bg: "#4ade80", border: "#000" };
+  }
+  if (e.isNonWinning) {
+    return { radius: 4, bg: "#fbbf24", border: "#000" };
+  }
+  return { radius: 3, bg: "rgba(255, 255, 255, 0.55)", border: "#000" };
+}
+
 function renderChart(data) {
   const scored = data.entries.filter((e) => e.score != null);
   const labels = scored.map((e) => `#${e.id}`);
   const scores = scored.map((e) => e.score);
+  const frontier = runningRecordFrontier(scored);
   const baselines = data.baselines || [];
+  const styles = scored.map(submissionPointStyle);
 
   const ctx = $("#scoreChart").getContext("2d");
   const grad = ctx.createLinearGradient(0, 0, 0, 320);
-  grad.addColorStop(0, "rgba(255, 255, 255, 0.12)");
-  grad.addColorStop(1, "rgba(255, 255, 255, 0.00)");
+  grad.addColorStop(0, "rgba(74, 222, 128, 0.10)");
+  grad.addColorStop(1, "rgba(74, 222, 128, 0.00)");
 
   new Chart(ctx, {
     type: "line",
@@ -113,17 +139,28 @@ function renderChart(data) {
       labels,
       datasets: [
         {
-          label: "cm SCORE",
-          data: scores,
-          borderColor: "rgba(255, 255, 255, 0.75)",
+          label: "Best SCORE so far",
+          data: frontier,
+          borderColor: "rgba(74, 222, 128, 0.85)",
           backgroundColor: grad,
           fill: true,
-          tension: 0.32,
+          stepped: "before",
+          tension: 0,
           borderWidth: 1.5,
-          pointRadius: scored.map((e) => (e.isRecord ? 5 : 3)),
+          pointRadius: 0,
+          pointHoverRadius: 0,
+          order: 1,
+        },
+        {
+          label: "Submissions",
+          data: scores,
+          borderColor: "transparent",
+          backgroundColor: "transparent",
+          showLine: false,
+          pointRadius: styles.map((s) => s.radius),
           pointHoverRadius: 7,
-          pointBackgroundColor: scored.map((e) => (e.isRecord ? "#4ade80" : "rgba(255, 255, 255, 0.55)")),
-          pointBorderColor: "#000",
+          pointBackgroundColor: styles.map((s) => s.bg),
+          pointBorderColor: styles.map((s) => s.border),
           pointBorderWidth: 2,
           order: 0,
         },
@@ -136,7 +173,7 @@ function renderChart(data) {
       interaction: { mode: "index", intersect: false },
       plugins: {
         legend: {
-          display: baselines.length > 0,
+          display: true,
           position: "bottom",
           labels: {
             color: "rgba(255, 255, 255, 0.45)",
@@ -145,6 +182,7 @@ function renderChart(data) {
             boxHeight: 1,
             padding: 14,
             usePointStyle: false,
+            filter: (item) => item.text !== "Submissions",
           },
         },
         tooltip: {
@@ -156,7 +194,7 @@ function renderChart(data) {
           titleFont: { family: "'JetBrains Mono', monospace", size: 11 },
           bodyFont: { family: "'DM Mono', monospace", size: 10 },
           padding: 12,
-          filter: (item) => item.datasetIndex === 0,
+          filter: (item) => item.datasetIndex === 1,
           callbacks: {
             title: (items) => {
               const e = scored[items[0].dataIndex];
@@ -164,7 +202,18 @@ function renderChart(data) {
             },
             label: (item) => {
               const e = scored[item.dataIndex];
-              return [`SCORE: ${fmt(e.score)}`, `Δ: ${e.delta}`, `vs zstd: ${e.vsZstd}`];
+              const lines = [
+                `SCORE: ${fmt(e.score)}`,
+                `Δ: ${e.delta}`,
+                `vs zstd: ${e.vsZstd}`,
+              ];
+              if (e.scoreRank != null) {
+                lines.push(`SCORE rank: #${e.scoreRank} of ${scored.length}`);
+              }
+              if (e.isNonWinning) {
+                lines.push("Non-winning (WORK/speed focus — not on record frontier)");
+              }
+              return lines;
             },
           },
         },
@@ -221,9 +270,10 @@ function renderGrid(data) {
       const avatar = user
         ? `https://github.com/${encodeURIComponent(user)}.png?size=80`
         : "";
-      const deltaClass = e.isRecord ? "good" : "flat";
+      const deltaClass = e.isRecord ? "good" : e.isNonWinning ? "warn" : "flat";
+      const rowClass = e.isRecord ? "record" : e.isNonWinning ? "non-winning" : "";
       return `
-      <tr class="${e.isRecord ? "record" : ""}" data-id="${e.id}" tabindex="0" role="button"
+      <tr class="${rowClass}" data-id="${e.id}" tabindex="0" role="button"
           aria-label="View details for entry ${e.id}">
         <td class="c-id">#${e.id}</td>
         <td class="c-author">
@@ -325,7 +375,7 @@ function openDialog(e, repo) {
   const profile = user ? `https://github.com/${encodeURIComponent(user)}` : "#";
   const commitUrl = `https://github.com/${repo}/commit/${e.commit}`;
   const entryUrl = e.entryPath ? `https://github.com/${repo}/blob/main/${e.entryPath}` : "";
-  const deltaClass = e.isRecord ? "good" : "flat";
+  const deltaClass = e.isRecord ? "good" : e.isNonWinning ? "warn" : "flat";
 
   $("#dialogInner").innerHTML = `
     <button class="dialog-close" aria-label="Close" data-close>×</button>
@@ -334,6 +384,7 @@ function openDialog(e, repo) {
       <div class="d-head-text">
         <div class="d-title">Entry #${e.id}
           ${e.isRecord ? '<span class="badge good">record</span>' : ""}
+          ${e.isNonWinning ? '<span class="badge warn">non-winning</span>' : ""}
         </div>
         <div class="d-sub">
           <a href="${profile}" target="_blank" rel="noopener">${escapeHtml(e.author)}</a>
@@ -344,7 +395,7 @@ function openDialog(e, repo) {
 
     <div class="d-metrics">
       ${e.model ? `<div class="d-metric"><span class="m-label">Model</span><span class="m-value">${escapeHtml(e.model)}</span></div>` : ""}
-      <div class="d-metric"><span class="m-label">SCORE</span><span class="m-value">${fmt(e.score)}</span></div>
+      <div class="d-metric"><span class="m-label">SCORE</span><span class="m-value">${fmt(e.score)}${e.scoreRank != null ? ` <span class="m-sub">(#${e.scoreRank} of ${Object.keys(ENTRIES_BY_ID).length})</span>` : ""}</span></div>
       <div class="d-metric"><span class="m-label">Δ vs record</span><span class="m-value"><span class="badge ${deltaClass}">${escapeHtml(e.delta)}</span></span></div>
       <div class="d-metric"><span class="m-label">vs zstd −22</span><span class="m-value">${escapeHtml(e.vsZstd)}</span></div>
       ${e.work != null ? `<div class="d-metric"><span class="m-label">WORK</span><span class="m-value" title="deterministic wasm fuel — executed operators; lower is faster">${fmt(e.work)}</span></div>` : ""}

@@ -34,7 +34,7 @@
     <section class="panel">
       <div class="panel-head">
         <h2>Score over time</h2>
-        <span class="hint">lower = better · dashed lines = reference compressors</span>
+        <span class="hint">lower = better · green line = record frontier · amber = non-winning</span>
       </div>
       <div class="chart-box">
         <canvas id="scoreChart"></canvas>
@@ -76,7 +76,7 @@
       <div class="instructions-body">
         <section class="d-sec">
           <h3>The objective</h3>
-          <p class="note">Minimize <strong>SCORE</strong> — total compressed bytes over a fixed corpus. Lower is better. The chart and table show every verified submission; green entries are new records.</p>
+          <p class="note">Minimize <strong>SCORE</strong> — total compressed bytes over a fixed corpus. Lower is better. The chart plots every submission at its true SCORE (y-axis); the green step line is the best SCORE so far. Non-winning entries (amber) sit at their SCORE height without moving the record.</p>
         </section>
 
         <section class="d-sec">

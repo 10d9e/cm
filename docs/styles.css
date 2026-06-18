@@ -15,6 +15,8 @@
   --good-soft: rgba(74, 222, 128, 0.08);
   --good-border: rgba(74, 222, 128, 0.35);
   --warn: #facc15;
+  --warn-soft: rgba(250, 204, 21, 0.08);
+  --warn-border: rgba(250, 204, 21, 0.35);
   --radius: 10px;
   --radius-lg: 14px;
   --font-sans: 'Syne', ui-sans-serif, system-ui, sans-serif;
@@ -315,6 +317,10 @@ table.leaderboard tbody tr.record td.c-id {
   box-shadow: inset 2px 0 0 var(--good);
 }
 
+table.leaderboard tbody tr.non-winning td.c-id {
+  box-shadow: inset 2px 0 0 var(--warn);
+}
+
 .c-id,
 .c-delta,
 .c-open,
@@ -415,6 +421,12 @@ table.leaderboard tbody td.diag { color: rgba(255, 255, 255, 0.38); }
   color: rgba(255, 255, 255, 0.32);
   background: rgba(255, 255, 255, 0.04);
   border-color: rgba(255, 255, 255, 0.08);
+}
+
+.badge.warn {
+  color: var(--warn);
+  background: var(--warn-soft);
+  border-color: var(--warn-border);
 }
 
 .c-open { text-align: right; overflow: visible; }
@@ -603,6 +615,12 @@ tr:hover .open-btn {
 }
 
 .m-value a:hover { color: #fff; }
+
+.m-sub {
+  color: rgba(255, 255, 255, 0.38);
+  font-size: 10px;
+  font-weight: 400;
+}
 
 .d-sec { margin-top: 20px; min-width: 0; }
 
