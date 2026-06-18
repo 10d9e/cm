@@ -22,7 +22,7 @@ const CTW_IN: usize = 2 * NCTX + 8; // Context Tree Weighting prediction
 const NINPUT: usize = 2 * NCTX + 9;
 const TBITS: u32 = 20; // default per-model context-table size (2^TBITS slots)
 const MIXCTX: usize = 16384;
-const NL1: usize = 22; // trimmed 27->22 (WORK reduction, within record headroom)
+const NL1: usize = 19; // perf trim 22->19
 const L1LR: i32 = 8; // layer-1 specialist learning rate
 const L2LR: i32 = 10; // layer-2 combiner learning rate
 const MIX3CTX: usize = 8192; // order-2 specialist rows
@@ -423,9 +423,6 @@ impl Cm {
             Mixer::new(NINPUT, 256, q),
             Mixer::new(NINPUT, 64, q),  // run-length regime selector
             Mixer::new(NINPUT, 32, q),  // gradient / delta-sign selector
-            Mixer::new(NINPUT, 16, q),  // periodic / record selector
-            Mixer::new(NINPUT, 64, q),  // above-char-class + nest selector
-            Mixer::new(NINPUT, 32, q),  // gradient-magnitude selector
         ];
         let l2 = Mixer::new(NL1, 256, L2LR);
         let l2b = Mixer::new(NL1, 256, L2LR);
@@ -1658,12 +1655,11 @@ impl Cm {
         // specialise on the coarse value of the byte one period back.
         let rgl = self.rlen;
         let rec_ok_l = self.rcount > 8 && rgl >= 2 && rgl < self.pos;
-        let recsel = if rec_ok_l {
+        let _recsel = if rec_ok_l {
             1 + ((self.b(self.pos - rgl) as usize) >> 5)
         } else {
             0
         };
-        self.l1[19].ctx = (recsel) & (self.l1[19].nctx - 1);
         // above-char-class + nesting selector: a 2D / structural mode keyed on
         // the class of the char one line up and the current bracket depth.
         let aboveclass = if self.above_byte > 255 {
@@ -1671,8 +1667,7 @@ impl Cm {
         } else {
             cls(self.above_byte)
         };
-        let abovesel = aboveclass | ((self.nest_depth & 7) << 3);
-        self.l1[20].ctx = (abovesel) & (self.l1[20].nctx - 1);
+        let _abovesel = aboveclass | ((self.nest_depth & 7) << 3);
         // gradient-magnitude selector: bucket the magnitude of the last byte
         // difference (flat / small / medium / large) with the last-byte class —
         // a smooth-vs-noisy numeric mode, distinct from the delta-sign selector.
@@ -1691,8 +1686,7 @@ impl Cm {
                 4
             }
         };
-        let gmagsel = dmag | (cls(self.c4) << 3);
-        self.l1[21].ctx = (gmagsel) & (self.l1[21].nctx - 1);
+        let _gmagsel = dmag | (cls(self.c4) << 3);
         // vertical-repeat selector: whether the byte one line up equals the last
         // byte, combined with match activity and the last-byte class.
         let vrep = if self.above_byte <= 255 && self.above_byte == self.c1 as u32 {
