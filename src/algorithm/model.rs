@@ -22,7 +22,7 @@ const CTW_IN: usize = 2 * NCTX + 8; // Context Tree Weighting prediction
 const NINPUT: usize = 2 * NCTX + 9;
 const TBITS: u32 = 20; // default per-model context-table size (2^TBITS slots)
 const MIXCTX: usize = 16384;
-const NL1: usize = 13; // perf trim 16->13
+const NL1: usize = 11; // perf trim 13->11
 const L1LR: i32 = 8; // layer-1 specialist learning rate
 const L2LR: i32 = 10; // layer-2 combiner learning rate
 const MIX3CTX: usize = 8192; // order-2 specialist rows
@@ -415,8 +415,6 @@ impl Cm {
             Mixer::new(NINPUT, 8192, q),
             Mixer::new(NINPUT, 4096, q),
             Mixer::new(NINPUT, 4096, q),
-            Mixer::new(NINPUT, 512, q),
-            Mixer::new(NINPUT, 256, q),
         ];
         let l2 = Mixer::new(NL1, 256, L2LR);
         let l2b = Mixer::new(NL1, 256, L2LR);
@@ -1340,11 +1338,9 @@ impl Cm {
         };
         self.l1[10].ctx = (ctx10) & (self.l1[10].nctx - 1);
         // byte-above selector (2D structure): specialise on the char one line up.
-        let ctx11 = (self.above_byte as usize) | ((self.c1 as usize & 1) << 9);
-        self.l1[11].ctx = (ctx11) & (self.l1[11].nctx - 1);
+        let _ctx11 = (self.above_byte as usize) | ((self.c1 as usize & 1) << 9);
         // specialise on the order-2 indirect prediction (the byte that most
         // recently followed this 2-byte context).
-        self.l1[12].ctx = (self.ind_pred as usize) & (self.l1[12].nctx - 1);
         // nest-state selector: specialise on the enclosing bracket + nesting depth.
         let _nestsel = if self.nest_depth > 0 {
             (self.nest_stack[self.nest_depth - 1] as usize) | ((self.nest_depth & 3) << 8)
