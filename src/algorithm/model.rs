@@ -9,7 +9,7 @@
 use super::dmc::Dmc;
 use super::tables::{build, build16, squash16_d, squash_d};
 
-const NCTX: usize = 81; // perf trim 86->81
+const NCTX: usize = 106; // orders + word/n-gram + sparse + 2D + record + indirect + run + nest + nibble + text shape/layout
                          // Mixer input layout:
                          //   [0 .. NCTX)            direct adaptive counters
                          //   [SM_BASE .. SM_BASE+NCTX) bit-history StateMap predictions (one per context)
@@ -22,7 +22,7 @@ const CTW_IN: usize = 2 * NCTX + 8; // Context Tree Weighting prediction
 const NINPUT: usize = 2 * NCTX + 9;
 const TBITS: u32 = 20; // default per-model context-table size (2^TBITS slots)
 const MIXCTX: usize = 16384;
-const NL1: usize = 9; // perf trim 11->9
+const NL1: usize = 19; // perf trim 22->19
 const L1LR: i32 = 8; // layer-1 specialist learning rate
 const L2LR: i32 = 10; // layer-2 combiner learning rate
 const MIX3CTX: usize = 8192; // order-2 specialist rows
@@ -45,7 +45,7 @@ const MMBITS6: u32 = 23; // order-4 (short) match model
 const MMSIZE6: usize = 1 << MMBITS6;
 const APM_S: usize = 33;
 const CNT_LIMIT: i32 = 254;
-const RATE_FLOOR: i32 = 40;
+const RATE_FLOOR: i32 = 16;
 
 /// One context-table slot, packed to 5 bytes so an 8-way bucket fits in a single
 /// cache line (array-of-structs). Fields: `cp` probability-2048, `cn` count,
@@ -64,6 +64,24 @@ fn hashk(h: u32, x: u32) -> u32 {
     h.wrapping_add(x).wrapping_add(1).wrapping_mul(2654435761)
 }
 
+/// Pack the letter/digit/space/other class (2 bits each) of the four bytes in
+/// `c4` into an 8-bit signature (0..255).
+#[inline]
+fn cls4(c4: u32) -> u32 {
+    let cl = |b: u32| -> u32 {
+        let b = b & 0xff;
+        if (b >= 97 && b <= 122) || (b >= 65 && b <= 90) {
+            1
+        } else if b >= 48 && b <= 57 {
+            2
+        } else if b == 32 || b == 9 || b == 10 || b == 13 {
+            3
+        } else {
+            0
+        }
+    };
+    cl(c4) | (cl(c4 >> 8) << 2) | (cl(c4 >> 16) << 4) | (cl(c4 >> 24) << 6)
+}
 
 /// Nonstationary bit-history state transition. The state byte packs two bounded
 /// counts (n0 in the high nibble, n1 in the low nibble, each 0..15). On each
@@ -266,6 +284,7 @@ pub struct Cm {
     apm4: Apm,
     dmc: Dmc,
     dmc2: Dmc,
+    dmc3: Dmc,
     c0: i32,
     bitcount: i32,
     c4: u32,
@@ -290,6 +309,24 @@ pub struct Cm {
     follow2: Vec<u32>,   // [65536] packed recent bytes that followed each order-2 ctx
     follow3: Vec<u32>,   // [FSIZE] hashed: bytes that followed each order-3 ctx
     follow4: Vec<u32>,   // [FSIZE] hashed: bytes that followed each order-4 ctx
+    follow5: Vec<u32>,   // [FSIZE] hashed: bytes that followed each order-5 ctx
+    follow6: Vec<u32>,   // [FSIZE] hashed: bytes that followed each order-6 ctx
+    followhn: Vec<u32>,  // [FSIZE] hashed: bytes that followed each high-nibble ctx
+    followd: Vec<u32>,   // [FSIZE] hashed: bytes that followed each byte-delta ctx
+    followc: Vec<u32>,   // [256] bytes that followed each char-class ctx
+    followln: Vec<u32>,  // [FSIZE] hashed: bytes that followed each low-nibble ctx
+    followg: Vec<u32>,   // [65536] bytes that followed each gap-bigram ctx
+    follows2: Vec<u32>,  // [65536] bytes that followed each stride-2 ctx
+    follows3: Vec<u32>,  // [65536] bytes that followed each stride-3 ctx
+    followg2: Vec<u32>,  // [65536] bytes that followed each wide-gap ctx
+    followhn8: Vec<u32>, // [FSIZE] bytes that followed each 8-byte high-nibble ctx
+    follows4: Vec<u32>,  // [65536] bytes that followed each stride-4 ctx
+    followln8: Vec<u32>, // [FSIZE] bytes that followed each 8-byte low-nibble ctx
+    followg14: Vec<u32>, // [65536] bytes that followed each gap(1,4) ctx
+    followcc8: Vec<u32>, // [65536] bytes that followed each 8-byte char-class ctx
+    follows5: Vec<u32>,  // [65536] bytes that followed each stride-5 ctx
+    followg16: Vec<u32>, // [65536] bytes that followed each gap(1,6) ctx
+    followw: Vec<u32>,   // [65536] hashed: bytes that followed each word prefix
 }
 
 impl Cm {
@@ -377,6 +414,16 @@ impl Cm {
             Mixer::new(NINPUT, 4096, q),
             Mixer::new(NINPUT, 8192, q),
             Mixer::new(NINPUT, 8192, q),
+            Mixer::new(NINPUT, 4096, q),
+            Mixer::new(NINPUT, 4096, q),
+            Mixer::new(NINPUT, 512, q),
+            Mixer::new(NINPUT, 256, q),
+            Mixer::new(NINPUT, 1024, q),
+            Mixer::new(NINPUT, 4096, q),
+            Mixer::new(NINPUT, 256, q),
+            Mixer::new(NINPUT, 256, q),
+            Mixer::new(NINPUT, 64, q),  // run-length regime selector
+            Mixer::new(NINPUT, 32, q),  // gradient / delta-sign selector
         ];
         let l2 = Mixer::new(NL1, 256, L2LR);
         let l2b = Mixer::new(NL1, 256, L2LR);
@@ -481,8 +528,9 @@ impl Cm {
             apm2,
             apm3,
             apm4,
-            dmc: Dmc::new(2, 2),
-            dmc2: Dmc::new(8, 8),
+            dmc: Dmc::new(1, 1),
+            dmc2: Dmc::new(2, 2),
+            dmc3: Dmc::new(3, 3),
             c0: 1,
             bitcount: 0,
             c4: 0,
@@ -507,6 +555,24 @@ impl Cm {
             follow2: vec![0u32; 65536],
             follow3: vec![0u32; FSIZE],
             follow4: vec![0u32; FSIZE],
+            follow5: vec![0u32; FSIZE],
+            follow6: vec![0u32; FSIZE],
+            followhn: vec![0u32; FSIZE],
+            followd: vec![0u32; FSIZE],
+            followc: vec![0u32; 256],
+            followln: vec![0u32; FSIZE],
+            followg: vec![0u32; 65536],
+            follows2: vec![0u32; 65536],
+            follows3: vec![0u32; 65536],
+            followg2: vec![0u32; 65536],
+            followhn8: vec![0u32; FSIZE],
+            follows4: vec![0u32; 65536],
+            followln8: vec![0u32; FSIZE],
+            followg14: vec![0u32; 65536],
+            followcc8: vec![0u32; 65536],
+            follows5: vec![0u32; 65536],
+            followg16: vec![0u32; 65536],
+            followw: vec![0u32; 65536],
         }
     }
 
@@ -1053,6 +1119,232 @@ impl Cm {
         );
         let j4 = (c4.wrapping_mul(0x85eb_ca6b) >> (32 - FBITS)) as usize;
         self.ctxhash[78] = hashk(0x6C00, c4 ^ self.follow4[j4].wrapping_mul(0x27d4_eb2f));
+        // Word-indirect: current word prefix + the bytes that have followed it.
+        self.ctxhash[81] = if self.wordhash != 0 {
+            let wk = (self.wordhash.wrapping_mul(0x9e37_79b1) >> 16) as usize;
+            hashk(
+                0x7000,
+                self.wordhash ^ self.followw[wk].wrapping_mul(0xc2b2_ae35),
+            )
+        } else {
+            0
+        };
+        // Run model: last byte + the length of its current run (capped). Models
+        // run continuation/termination (zero-runs in binary, repeated chars).
+        self.ctxhash[82] = hashk(0x7100, (c4 & 0xff) | (self.run_len.min(255) << 8));
+        // Nesting model: predict from bracket-nesting depth and the enclosing
+        // bracket — captures the ()[]{} structure pervasive in source code.
+        let last_open = if self.nest_depth > 0 {
+            self.nest_stack[self.nest_depth - 1] as u32
+        } else {
+            0
+        };
+        self.ctxhash[83] = hashk(0x7200, (self.nest_depth as u32 & 31) | ((c4 & 0xff) << 5));
+        self.ctxhash[84] = hashk(0x7300, last_open | ((c4 & 0xff) << 8));
+        // enclosing bracket + nesting depth + order-2 context (finer structure)
+        self.ctxhash[85] = hashk(
+            0x7400,
+            last_open.wrapping_mul(0x9e37_79b1)
+                ^ ((self.nest_depth as u32 & 31) << 16)
+                ^ (c4 & 0xffff),
+        );
+        // High-nibble (opcode-class) context: the top nibble of the last 5 bytes,
+        // ignoring low-bit operand noise — targets executable/binary structure.
+        let hn = (c4 & 0xf0f0_f0f0)
+            ^ if self.pos >= 5 {
+                ((self.b(self.pos - 5) as u32) & 0xf0) << 24
+            } else {
+                0
+            };
+        self.ctxhash[86] = hashk(0x7700, hn);
+        // longer high-nibble context (last 8 bytes' top nibbles), order-8-coarse.
+        self.ctxhash[87] = if self.pos >= 8 {
+            hashk(
+                0x7800,
+                hn.wrapping_mul(0x9e37_79b1)
+                    ^ ((self.b(self.pos - 6) as u32 & 0xf0) << 4)
+                    ^ ((self.b(self.pos - 7) as u32 & 0xf0) << 12)
+                    ^ ((self.b(self.pos - 8) as u32 & 0xf0) << 20),
+            )
+        } else {
+            hashk(0x7800, hn)
+        };
+        // byte-delta context: differences between consecutive recent bytes —
+        // captures gradients/patterns in numeric and tabular data.
+        let d1 = (c4 & 0xff).wrapping_sub((c4 >> 8) & 0xff) & 0xff;
+        let d2 = ((c4 >> 8) & 0xff).wrapping_sub((c4 >> 16) & 0xff) & 0xff;
+        let d3 = ((c4 >> 16) & 0xff).wrapping_sub((c4 >> 24) & 0xff) & 0xff;
+        self.ctxhash[88] = hashk(0x7900, d1 | (d2 << 8) | (d3 << 16));
+        // Indirect order-5 / order-6 models: the longer base context combined
+        // with the recent history of bytes that have followed it. Extends the
+        // order-1..4 indirect family to deterministic longer-range structure
+        // (helps executable/source repeats the direct long orders miss).
+        if self.pos >= 5 {
+            let m5 = c4.wrapping_mul(0x9e37_79b1)
+                ^ (self.b(self.pos - 5) as u32).wrapping_mul(0x85eb_ca6b);
+            let k5 = (m5 >> (32 - FBITS)) as usize;
+            self.ctxhash[89] = hashk(0x7A00, m5 ^ self.follow5[k5].wrapping_mul(0xc2b2_ae35));
+        } else {
+            self.ctxhash[89] = 0;
+        }
+        if self.pos >= 6 {
+            let m6 = c4.wrapping_mul(0x85eb_ca6b)
+                ^ (self.b(self.pos - 5) as u32).wrapping_mul(0xc2b2_ae35)
+                ^ (self.b(self.pos - 6) as u32).wrapping_mul(0x27d4_eb2f);
+            let k6 = (m6 >> (32 - FBITS)) as usize;
+            self.ctxhash[90] = hashk(0x7B00, m6 ^ self.follow6[k6].wrapping_mul(0x9e37_79b1));
+        } else {
+            self.ctxhash[90] = 0;
+        }
+        // High-nibble indirect: the opcode-class pattern (high nibble of the last
+        // four bytes) combined with the recent history of bytes that followed it.
+        // Merges the high-nibble and indirect families to capture "what operand
+        // byte usually follows this instruction-class pattern" in executables.
+        let hnm = (c4 & 0xf0f0_f0f0).wrapping_mul(0x9e37_79b1);
+        let khn = (hnm >> (32 - FBITS)) as usize;
+        self.ctxhash[91] = hashk(0x7C00, hnm ^ self.followhn[khn].wrapping_mul(0xc2b2_ae35));
+        // Byte-delta indirect: the consecutive-difference pattern combined with
+        // the recent history of bytes that followed it (numeric/tabular regimes).
+        let dm = (d1 | (d2 << 8) | (d3 << 16)).wrapping_mul(0x85eb_ca6b);
+        let kd = (dm >> (32 - FBITS)) as usize;
+        self.ctxhash[92] = hashk(0x7D00, dm ^ self.followd[kd].wrapping_mul(0x27d4_eb2f));
+        // Char-class indirect: the letter/digit/space/other pattern of the last
+        // four bytes combined with the bytes that have followed it (text regimes).
+        let cck = cls4(c4);
+        self.ctxhash[93] = hashk(
+            0x7E00,
+            cck ^ self.followc[cck as usize].wrapping_mul(0x9e37_79b1),
+        );
+        // Low-nibble indirect: the low nibbles of the last four bytes (operand /
+        // register pattern in code) combined with the bytes that followed it.
+        let lnm = (c4 & 0x0f0f_0f0f).wrapping_mul(0xc2b2_ae35);
+        let kln = (lnm >> (32 - FBITS)) as usize;
+        self.ctxhash[94] = hashk(0x7F00, lnm ^ self.followln[kln].wrapping_mul(0x85eb_ca6b));
+        // Gap-bigram indirect: the (last byte, byte three back) sparse pair plus
+        // the bytes that followed it.
+        let gk = if self.pos >= 3 {
+            (c4 & 0xff) | ((self.b(self.pos - 3) as u32) << 8)
+        } else {
+            c4 & 0xffff
+        };
+        self.ctxhash[95] = hashk(
+            0x8000,
+            gk ^ self.followg[gk as usize].wrapping_mul(0x27d4_eb2f),
+        );
+        // Stride-2 indirect: the (pos-2, pos-4) interleaved pair plus its history.
+        let sk = if self.pos >= 4 {
+            (self.b(self.pos - 2) as u32) | ((self.b(self.pos - 4) as u32) << 8)
+        } else {
+            c4 & 0xffff
+        };
+        self.ctxhash[96] = hashk(
+            0x8100,
+            sk ^ self.follows2[sk as usize].wrapping_mul(0x9e37_79b1),
+        );
+        // Stride-3 indirect: the (pos-3, pos-6) pair plus its follow history.
+        let s3k = if self.pos >= 6 {
+            (self.b(self.pos - 3) as u32) | ((self.b(self.pos - 6) as u32) << 8)
+        } else {
+            c4 & 0xffff
+        };
+        self.ctxhash[97] = hashk(
+            0x8200,
+            s3k ^ self.follows3[s3k as usize].wrapping_mul(0x85eb_ca6b),
+        );
+        // Wide-gap indirect: the (last byte, byte five back) sparse pair plus its
+        // follow history (longer-range sparse structure).
+        let g2k = if self.pos >= 5 {
+            (c4 & 0xff) | ((self.b(self.pos - 5) as u32) << 8)
+        } else {
+            c4 & 0xffff
+        };
+        self.ctxhash[98] = hashk(
+            0x8300,
+            g2k ^ self.followg2[g2k as usize].wrapping_mul(0xc2b2_ae35),
+        );
+        // 8-byte high-nibble indirect: extends the (winning) 4-byte high-nibble
+        // indirect to an 8-byte opcode-class pattern — longer instruction-class
+        // context for executables.
+        let hn8 = if self.pos >= 8 {
+            hnm ^ ((self.b(self.pos - 5) as u32 & 0xf0) << 4)
+                ^ ((self.b(self.pos - 6) as u32 & 0xf0) << 12)
+                ^ ((self.b(self.pos - 7) as u32 & 0xf0) << 20)
+                ^ ((self.b(self.pos - 8) as u32 & 0xf0).wrapping_mul(0x85eb_ca6b))
+        } else {
+            hnm
+        };
+        let khn8 = (hn8 >> (32 - FBITS)) as usize;
+        self.ctxhash[99] = hashk(0x8500, hn8 ^ self.followhn8[khn8].wrapping_mul(0x27d4_eb2f));
+        // Stride-4 indirect: the (pos-4, pos-8) pair plus its follow history —
+        // dword-aligned periodic structure (operand/address tables in code).
+        let s4k = if self.pos >= 8 {
+            (self.b(self.pos - 4) as u32) | ((self.b(self.pos - 8) as u32) << 8)
+        } else {
+            c4 & 0xffff
+        };
+        self.ctxhash[100] = hashk(
+            0x8600,
+            s4k ^ self.follows4[s4k as usize].wrapping_mul(0x9e37_79b1),
+        );
+        // 8-byte low-nibble indirect: operand/register-pattern analog of hn8.
+        let ln8 = if self.pos >= 8 {
+            (c4 & 0x0f0f_0f0f).wrapping_mul(0xc2b2_ae35)
+                ^ ((self.b(self.pos - 5) as u32 & 0x0f) << 4)
+                ^ ((self.b(self.pos - 6) as u32 & 0x0f) << 12)
+                ^ ((self.b(self.pos - 7) as u32 & 0x0f) << 20)
+                ^ ((self.b(self.pos - 8) as u32 & 0x0f).wrapping_mul(0x9e37_79b1))
+        } else {
+            (c4 & 0x0f0f_0f0f).wrapping_mul(0xc2b2_ae35)
+        };
+        let kln8 = (ln8 >> (32 - FBITS)) as usize;
+        self.ctxhash[101] = hashk(0x8700, ln8 ^ self.followln8[kln8].wrapping_mul(0x27d4_eb2f));
+        // gap(1,4) indirect: the (last byte, byte four back) sparse pair + history.
+        let g14k = if self.pos >= 4 {
+            (c4 & 0xff) | ((self.b(self.pos - 4) as u32) << 8)
+        } else {
+            c4 & 0xffff
+        };
+        self.ctxhash[102] = hashk(
+            0x8800,
+            g14k ^ self.followg14[g14k as usize].wrapping_mul(0x85eb_ca6b),
+        );
+        // 8-byte char-class indirect: extends the char-class indirect to an
+        // 8-byte letter/digit/space/other pattern (text / source structure).
+        let cc8 = if self.pos >= 8 {
+            cls4(c4)
+                | (cls4(
+                    (self.b(self.pos - 5) as u32)
+                        | ((self.b(self.pos - 6) as u32) << 8)
+                        | ((self.b(self.pos - 7) as u32) << 16)
+                        | ((self.b(self.pos - 8) as u32) << 24),
+                ) << 8)
+        } else {
+            cls4(c4)
+        };
+        self.ctxhash[103] = hashk(
+            0x8900,
+            cc8 ^ self.followcc8[cc8 as usize].wrapping_mul(0xc2b2_ae35),
+        );
+        // Stride-5 indirect: the (pos-5, pos-10) pair plus its follow history.
+        let s5k = if self.pos >= 10 {
+            (self.b(self.pos - 5) as u32) | ((self.b(self.pos - 10) as u32) << 8)
+        } else {
+            c4 & 0xffff
+        };
+        self.ctxhash[104] = hashk(
+            0x8A00,
+            s5k ^ self.follows5[s5k as usize].wrapping_mul(0x27d4_eb2f),
+        );
+        // gap(1,6) indirect: the (last byte, byte six back) sparse pair + history.
+        let g16k = if self.pos >= 6 {
+            (c4 & 0xff) | ((self.b(self.pos - 6) as u32) << 8)
+        } else {
+            c4 & 0xffff
+        };
+        self.ctxhash[105] = hashk(
+            0x8B00,
+            g16k ^ self.followg16[g16k as usize].wrapping_mul(0x9e37_79b1),
+        );
     }
 
     #[inline]
@@ -1224,7 +1516,7 @@ impl Cm {
         // DMC variable-order Markov prediction — one extra mixer input.
         self.mix_in[DMC_IN] = self.dmc.predict(&self.stretch);
         self.mix_in[DMC2_IN] = self.dmc2.predict(&self.stretch);
-        self.mix_in[CTW_IN] = 0; // CTW removed (perf)
+        self.mix_in[CTW_IN] = self.dmc3.predict(&self.stretch); // 3rd DMC in the freed CTW slot
         // Pre-widen the full input vector to i64 once; all 27 layer-1 mixers dot
         // the same vector, so this lifts the per-element sign-extend out of the
         // hot loop (run 27x per bit) into a single pass.
@@ -1268,29 +1560,35 @@ impl Cm {
         };
         self.l1[8].ctx = (ctx8) & (self.l1[8].nctx - 1);
         // stride-2 sparse selector: bytes at pos-2 and pos-4 (interleaved structure).
-        let _ctx9 = if self.pos >= 4 {
+        let ctx9 = if self.pos >= 4 {
             (self.b(self.pos - 2) as usize) | ((self.b(self.pos - 4) as usize) << 8)
         } else {
             self.c1 as usize
         };
+        self.l1[9].ctx = (ctx9) & (self.l1[9].nctx - 1);
         // stride-3 sparse selector: bytes at pos-3 and pos-6.
-        let _ctx10 = if self.pos >= 6 {
+        let ctx10 = if self.pos >= 6 {
             (self.b(self.pos - 3) as usize) | ((self.b(self.pos - 6) as usize) << 8)
         } else {
             self.c1 as usize
         };
+        self.l1[10].ctx = (ctx10) & (self.l1[10].nctx - 1);
         // byte-above selector (2D structure): specialise on the char one line up.
-        let _ctx11 = (self.above_byte as usize) | ((self.c1 as usize & 1) << 9);
+        let ctx11 = (self.above_byte as usize) | ((self.c1 as usize & 1) << 9);
+        self.l1[11].ctx = (ctx11) & (self.l1[11].nctx - 1);
         // specialise on the order-2 indirect prediction (the byte that most
         // recently followed this 2-byte context).
+        self.l1[12].ctx = (self.ind_pred as usize) & (self.l1[12].nctx - 1);
         // nest-state selector: specialise on the enclosing bracket + nesting depth.
-        let _nestsel = if self.nest_depth > 0 {
+        let nestsel = if self.nest_depth > 0 {
             (self.nest_stack[self.nest_depth - 1] as usize) | ((self.nest_depth & 3) << 8)
         } else {
             0
         };
+        self.l1[13].ctx = (nestsel) & (self.l1[13].nctx - 1);
         // high-nibble (opcode-class) selector.
-        let _hnsel = ((self.c4 & 0xf0f0_f0f0).wrapping_mul(0x9e37_79b1) >> 20) as usize;
+        let hnsel = ((self.c4 & 0xf0f0_f0f0).wrapping_mul(0x9e37_79b1) >> 20) as usize;
+        self.l1[14].ctx = (hnsel) & (self.l1[14].nctx - 1);
         // character-class selector (letter/digit/space/other of last 4 bytes) —
         // a coarse semantic text-mode grouping (analogous to the high-nibble one).
         let cls = |b: u32| -> usize {
@@ -1305,14 +1603,16 @@ impl Cm {
                 0
             }
         };
-        let _ccsel = cls(self.c4)
+        let ccsel = cls(self.c4)
             | (cls(self.c4 >> 8) << 2)
             | (cls(self.c4 >> 16) << 4)
             | (cls(self.c4 >> 24) << 6);
+        self.l1[15].ctx = (ccsel) & (self.l1[15].nctx - 1);
         // combined mode selector: last byte's high nibble + char-class of the
         // last two bytes (a richer visual+semantic mode than either alone).
-        let _modesel =
+        let modesel =
             ((self.c4 & 0xf0) >> 4) as usize | (cls(self.c4) << 4) | (cls(self.c4 >> 8) << 6);
+        self.l1[16].ctx = (modesel) & (self.l1[16].nctx - 1);
         // run-length regime selector: bucket the current run length with the
         // class of the last byte — distinguishes "in a long run" from "varying".
         let runb = {
@@ -1335,7 +1635,8 @@ impl Cm {
                 7
             }
         };
-        let _runsel = runb | (cls(self.c4) << 3);
+        let runsel = runb | (cls(self.c4) << 3);
+        self.l1[17].ctx = (runsel) & (self.l1[17].nctx - 1);
         // gradient / delta-sign selector: coarse sign (zero/up/down) of the last
         // three consecutive byte differences — a "numeric trend" mode.
         let dsign = |a: u32, b: u32| -> usize {
@@ -1348,9 +1649,10 @@ impl Cm {
                 2
             }
         };
-        let _gradsel = dsign(self.c4, self.c4 >> 8)
+        let gradsel = dsign(self.c4, self.c4 >> 8)
             + 3 * dsign(self.c4 >> 8, self.c4 >> 16)
             + 9 * dsign(self.c4 >> 16, self.c4 >> 24);
+        self.l1[18].ctx = (gradsel) & (self.l1[18].nctx - 1);
         // periodic / record selector: when the period detector is confident,
         // specialise on the coarse value of the byte one period back.
         let rgl = self.rlen;
@@ -1621,6 +1923,7 @@ impl Cm {
         self.apm4.update(bit);
         self.dmc.update(bit);
         self.dmc2.update(bit);
+        self.dmc3.update(bit);
         // CTW removed (perf)
         if self.mm_used {
             let v = self.mm_sm[self.mm_idx] as i32;
@@ -1724,7 +2027,7 @@ impl Cm {
             let cnt = (entry & 1023) as i32;
             let p22 = (entry >> 10) as i32;
             let newp = p22 + (((bit << 22) - p22) / (cnt + 2));
-            let newcnt = if cnt < 511 { cnt + 1 } else { 511 };
+            let newcnt = if cnt < 255 { cnt + 1 } else { 255 };
             *smcell = ((newp as u32) << 10) | (newcnt as u32);
             slot.st = next_state(s as u8, bit);
         }
@@ -1802,6 +2105,116 @@ impl Cm {
             self.follow3[ic3] = (self.follow3[ic3] << 8) | byte as u32;
             let ic4 = (self.c4.wrapping_mul(0x85eb_ca6b) >> (32 - FBITS)) as usize;
             self.follow4[ic4] = (self.follow4[ic4] << 8) | byte as u32;
+            if self.pos >= 5 {
+                let m5 = self.c4.wrapping_mul(0x9e37_79b1)
+                    ^ (self.b(self.pos - 5) as u32).wrapping_mul(0x85eb_ca6b);
+                let k5 = (m5 >> (32 - FBITS)) as usize;
+                self.follow5[k5] = (self.follow5[k5] << 8) | byte as u32;
+            }
+            if self.pos >= 6 {
+                let m6 = self.c4.wrapping_mul(0x85eb_ca6b)
+                    ^ (self.b(self.pos - 5) as u32).wrapping_mul(0xc2b2_ae35)
+                    ^ (self.b(self.pos - 6) as u32).wrapping_mul(0x27d4_eb2f);
+                let k6 = (m6 >> (32 - FBITS)) as usize;
+                self.follow6[k6] = (self.follow6[k6] << 8) | byte as u32;
+            }
+            {
+                let hnm = (self.c4 & 0xf0f0_f0f0).wrapping_mul(0x9e37_79b1);
+                let khn = (hnm >> (32 - FBITS)) as usize;
+                self.followhn[khn] = (self.followhn[khn] << 8) | byte as u32;
+                let dd1 = (self.c4 & 0xff).wrapping_sub((self.c4 >> 8) & 0xff) & 0xff;
+                let dd2 = ((self.c4 >> 8) & 0xff).wrapping_sub((self.c4 >> 16) & 0xff) & 0xff;
+                let dd3 = ((self.c4 >> 16) & 0xff).wrapping_sub((self.c4 >> 24) & 0xff) & 0xff;
+                let dm = (dd1 | (dd2 << 8) | (dd3 << 16)).wrapping_mul(0x85eb_ca6b);
+                let kd = (dm >> (32 - FBITS)) as usize;
+                self.followd[kd] = (self.followd[kd] << 8) | byte as u32;
+                let cck = cls4(self.c4) as usize;
+                self.followc[cck] = (self.followc[cck] << 8) | byte as u32;
+                let lnm = (self.c4 & 0x0f0f_0f0f).wrapping_mul(0xc2b2_ae35);
+                let kln = (lnm >> (32 - FBITS)) as usize;
+                self.followln[kln] = (self.followln[kln] << 8) | byte as u32;
+                let gk = if self.pos >= 3 {
+                    (self.c4 & 0xff) | ((self.b(self.pos - 3) as u32) << 8)
+                } else {
+                    self.c4 & 0xffff
+                } as usize;
+                self.followg[gk] = (self.followg[gk] << 8) | byte as u32;
+                let sk = if self.pos >= 4 {
+                    (self.b(self.pos - 2) as u32) | ((self.b(self.pos - 4) as u32) << 8)
+                } else {
+                    self.c4 & 0xffff
+                } as usize;
+                self.follows2[sk] = (self.follows2[sk] << 8) | byte as u32;
+                let s3k = if self.pos >= 6 {
+                    (self.b(self.pos - 3) as u32) | ((self.b(self.pos - 6) as u32) << 8)
+                } else {
+                    self.c4 & 0xffff
+                } as usize;
+                self.follows3[s3k] = (self.follows3[s3k] << 8) | byte as u32;
+                let g2k = if self.pos >= 5 {
+                    (self.c4 & 0xff) | ((self.b(self.pos - 5) as u32) << 8)
+                } else {
+                    self.c4 & 0xffff
+                } as usize;
+                self.followg2[g2k] = (self.followg2[g2k] << 8) | byte as u32;
+                let hn8 = if self.pos >= 8 {
+                    hnm ^ ((self.b(self.pos - 5) as u32 & 0xf0) << 4)
+                        ^ ((self.b(self.pos - 6) as u32 & 0xf0) << 12)
+                        ^ ((self.b(self.pos - 7) as u32 & 0xf0) << 20)
+                        ^ ((self.b(self.pos - 8) as u32 & 0xf0).wrapping_mul(0x85eb_ca6b))
+                } else {
+                    hnm
+                };
+                let khn8 = (hn8 >> (32 - FBITS)) as usize;
+                self.followhn8[khn8] = (self.followhn8[khn8] << 8) | byte as u32;
+                let s4k = if self.pos >= 8 {
+                    (self.b(self.pos - 4) as u32) | ((self.b(self.pos - 8) as u32) << 8)
+                } else {
+                    self.c4 & 0xffff
+                } as usize;
+                self.follows4[s4k] = (self.follows4[s4k] << 8) | byte as u32;
+                let ln8 = if self.pos >= 8 {
+                    (self.c4 & 0x0f0f_0f0f).wrapping_mul(0xc2b2_ae35)
+                        ^ ((self.b(self.pos - 5) as u32 & 0x0f) << 4)
+                        ^ ((self.b(self.pos - 6) as u32 & 0x0f) << 12)
+                        ^ ((self.b(self.pos - 7) as u32 & 0x0f) << 20)
+                        ^ ((self.b(self.pos - 8) as u32 & 0x0f).wrapping_mul(0x9e37_79b1))
+                } else {
+                    (self.c4 & 0x0f0f_0f0f).wrapping_mul(0xc2b2_ae35)
+                };
+                let kln8 = (ln8 >> (32 - FBITS)) as usize;
+                self.followln8[kln8] = (self.followln8[kln8] << 8) | byte as u32;
+                let g14k = if self.pos >= 4 {
+                    (self.c4 & 0xff) | ((self.b(self.pos - 4) as u32) << 8)
+                } else {
+                    self.c4 & 0xffff
+                } as usize;
+                self.followg14[g14k] = (self.followg14[g14k] << 8) | byte as u32;
+                let cc8 = if self.pos >= 8 {
+                    cls4(self.c4)
+                        | (cls4(
+                            (self.b(self.pos - 5) as u32)
+                                | ((self.b(self.pos - 6) as u32) << 8)
+                                | ((self.b(self.pos - 7) as u32) << 16)
+                                | ((self.b(self.pos - 8) as u32) << 24),
+                        ) << 8)
+                } else {
+                    cls4(self.c4)
+                } as usize;
+                self.followcc8[cc8] = (self.followcc8[cc8] << 8) | byte as u32;
+                let s5k = if self.pos >= 10 {
+                    (self.b(self.pos - 5) as u32) | ((self.b(self.pos - 10) as u32) << 8)
+                } else {
+                    self.c4 & 0xffff
+                } as usize;
+                self.follows5[s5k] = (self.follows5[s5k] << 8) | byte as u32;
+                let g16k = if self.pos >= 6 {
+                    (self.c4 & 0xff) | ((self.b(self.pos - 6) as u32) << 8)
+                } else {
+                    self.c4 & 0xffff
+                } as usize;
+                self.followg16[g16k] = (self.followg16[g16k] << 8) | byte as u32;
+            }
             let bp = (self.pos & self.bufmask) as usize;
             self.buf[bp] = byte;
             self.pos += 1;
@@ -1855,6 +2268,9 @@ impl Cm {
                 self.rlen = d;
                 self.rcount = 1;
             }
+            // Word-indirect: record that `byte` followed the current word prefix.
+            let wk = (self.wordhash.wrapping_mul(0x9e37_79b1) >> 16) as usize;
+            self.followw[wk] = (self.followw[wk] << 8) | byte as u32;
             if (byte >= b'a' && byte <= b'z')
                 || (byte >= b'A' && byte <= b'Z')
                 || (byte >= b'0' && byte <= b'9')
