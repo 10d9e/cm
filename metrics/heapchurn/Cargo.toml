@@ -9,5 +9,3 @@ wasmtime = { version = "26", default-features = false, features = ["cranelift", 
 
 [profile.release]
 opt-level = 3
-
-[workspace]

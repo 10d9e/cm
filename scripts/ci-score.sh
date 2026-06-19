@@ -49,60 +49,24 @@ printf '  %s\n' $algo_changed
 echo "== evaluate (authoritative score; runs untrusted competitor code) =="
 bash scripts/evaluate.sh --no-guard
 
-# Deterministic complexity metric (best-effort; never blocks recording). Runs the
-# merged code through the wasm fuel meter that lives outside src/algorithm/.
+# Deterministic complexity / memory metrics (best-effort; never blocks recording).
+# One build + one instrumentation pass for WORK, MEMCOST, LINES, HEAP_PEAK,
+# HEAP_CHURN via scripts/measure-all.sh.
 work=""
-echo "== complexity metric (wasm fuel) =="
-if work_out="$(bash scripts/measure-complexity.sh 2>&1)"; then
-  echo "$work_out"
-  work="$(printf '%s\n' "$work_out" | sed -n 's/^WORK: \([0-9][0-9]*\).*/\1/p' | tail -1)"
-else
-  echo "scorekeeper: complexity metric unavailable; recording without WORK"
-fi
-
-# Memory-traffic metric (best-effort; never blocks recording). Instruments the
-# wasm loads/stores and runs the deterministic access trace through a fixed cache
-# model — captures the cache/latency cost that WORK (operator count) cannot see.
 memcost=""
-echo "== memory-traffic metric (wasm cache model) =="
-if mem_out="$(bash scripts/measure-memcost.sh 2>&1)"; then
-  echo "$mem_out"
-  memcost="$(printf '%s\n' "$mem_out" | sed -n 's/^MEMCOST: \([0-9][0-9]*\).*/\1/p' | tail -1)"
-else
-  echo "scorekeeper: memory-traffic metric unavailable; recording without MEMCOST"
-fi
-
-# Distinct-cache-lines metric (best-effort; never blocks recording). Companion to
-# MEMCOST: counts distinct 64B lines touched on the same init-free differencing.
 lines=""
-echo "== distinct-cache-lines metric (LINES) =="
-if out=$(bash scripts/measure-lines.sh 2>&1); then
-  echo "$out"
-  lines="$(printf '%s\n' "$out" | sed -n 's/^LINES: \([0-9]*\).*/\1/p' | tail -1)"
-else
-  echo "scorekeeper: LINES unavailable; recording without LINES"
-fi
-
-# Peak reserved-heap metric (best-effort; never blocks recording). Full-corpus
-# peak live reserved heap under a tracking allocator.
 heap_peak=""
-echo "== peak reserved-heap metric (HEAP_PEAK) =="
-if out=$(bash scripts/measure-heappeak.sh 2>&1); then
-  echo "$out"
-  heap_peak="$(printf '%s\n' "$out" | sed -n 's/^HEAP_PEAK: \([0-9]*\).*/\1/p' | tail -1)"
-else
-  echo "scorekeeper: HEAP_PEAK unavailable; recording without HEAP_PEAK"
-fi
-
-# Init-free heap-churn metric (best-effort; never blocks recording). Differences
-# requested heap bytes between FULL and HALF prefixes via the heap-feature shim.
 heap_churn=""
-echo "== init-free heap-churn metric (HEAP_CHURN) =="
-if out=$(bash scripts/measure-heapchurn.sh 2>&1); then
+echo "== metrics (WORK, MEMCOST, LINES, HEAP_PEAK, HEAP_CHURN) =="
+if out="$(bash scripts/measure-all.sh 2>&1)"; then
   echo "$out"
+  work="$(printf '%s\n' "$out" | sed -n 's/^WORK: \([0-9][0-9]*\).*/\1/p' | tail -1)"
+  memcost="$(printf '%s\n' "$out" | sed -n 's/^MEMCOST: \([0-9][0-9]*\).*/\1/p' | tail -1)"
+  lines="$(printf '%s\n' "$out" | sed -n 's/^LINES: \([0-9]*\).*/\1/p' | tail -1)"
+  heap_peak="$(printf '%s\n' "$out" | sed -n 's/^HEAP_PEAK: \([0-9]*\).*/\1/p' | tail -1)"
   heap_churn="$(printf '%s\n' "$out" | sed -n 's/^HEAP_CHURN: \([0-9]*\).*/\1/p' | tail -1)"
 else
-  echo "scorekeeper: HEAP_CHURN unavailable; recording without HEAP_CHURN"
+  echo "scorekeeper: metrics unavailable; recording without WORK/MEMCOST/LINES/HEAP_*"
 fi
 
 # PR metadata. The token here is the read-only default GITHUB_TOKEN.

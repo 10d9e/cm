@@ -12,8 +12,8 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 rustup target add wasm32-unknown-unknown >/dev/null 2>&1 || true
-( cd metrics/wasm && RUSTFLAGS="" cargo build --release --quiet --target wasm32-unknown-unknown )
-( cd metrics/host && cargo build --release --quiet )
+( cd metrics && RUSTFLAGS="" cargo build --release --quiet -p cm-wasm-meter --target wasm32-unknown-unknown )
+( cd metrics && cargo build --release --quiet -p cm-fuel-meter )
 
-WASM=metrics/wasm/target/wasm32-unknown-unknown/release/cm_wasm_meter.wasm
-./metrics/host/target/release/cm-fuel-meter "$WASM"
+WASM=metrics/target/wasm32-unknown-unknown/release/cm_wasm_meter.wasm
+./metrics/target/release/cm-fuel-meter "$WASM"
