@@ -3,5 +3,5 @@
 # diagnostic — peak live reserved heap over the full corpus. FROZEN.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-( cd metrics/heappeak && cargo build --release --quiet )
-./metrics/heappeak/target/release/cm-heappeak-meter corpus
+( cd metrics && cargo build --release --quiet -p cm-heappeak-meter )
+./metrics/target/release/cm-heappeak-meter corpus

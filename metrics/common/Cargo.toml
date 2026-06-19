@@ -1,15 +1,11 @@
 [package]
-name = "cm-lines-meter"
+name = "cm-metrics-common"
 version = "0.0.0"
 edition = "2021"
 publish = false
 
-[[bin]]
-name = "cm-lines-meter"
-path = "src/main.rs"
-
 [dependencies]
-walrus = "0.23"
+walrus = "=0.23.3"
 wasmtime = { version = "26", default-features = false, features = ["cranelift", "runtime"] }
 
 [profile.release]

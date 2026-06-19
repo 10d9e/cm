@@ -1,0 +1,16 @@
+[package]
+name = "cm-all-meter"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "cm-all-meter"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+cm-metrics-common = { path = "../common" }
+
+[profile.release]
+opt-level = 3

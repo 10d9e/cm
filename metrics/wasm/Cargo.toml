@@ -16,5 +16,3 @@ heap = []
 [profile.release]
 opt-level = 3
 panic = "abort"
-
-[workspace]
