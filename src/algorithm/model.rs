@@ -532,6 +532,9 @@ impl Cm {
             apm2,
             apm3,
             apm4,
+            // Two complementary-speed DMCs (aggressive clone thresholds); paired
+            // with RATE_FLOOR=16 these set the 572060 record (re-tuned from the
+            // frontier's stale 2/8 + RATE_FLOOR 40).
             dmc: Dmc::new(1, 1),
             dmc2: Dmc::new(2, 2),
             ctw: Ctw::new(),
