@@ -20,7 +20,7 @@ const MM_BASE: usize = 2 * NCTX;
 const DMC_IN: usize = 2 * NCTX + 6; // DMC variable-order prediction (one extra input)
 const DMC2_IN: usize = 2 * NCTX + 7; // second, slow-cloning DMC prediction
 const CTW_IN: usize = 2 * NCTX + 8; // Context Tree Weighting prediction
-const NINPUT: usize = 2 * NCTX + 9;
+const NINPUT: usize = 2 * NCTX + 11;
 const TBITS: u32 = 20; // default per-model context-table size (2^TBITS slots)
 const MIXCTX: usize = 16384;
 const NL1: usize = 22; // trimmed 27->22 (WORK reduction, within record headroom)
@@ -209,7 +209,7 @@ pub struct Cm {
     squash16: Vec<i32>,
     // Per-context slots stored array-of-structs (one packed 5-byte Slot) so a
     // bucket access touches a single cache line instead of four separate arrays.
-    tab: Vec<Vec<Slot>>, // [NCTX][TSIZE]
+    tab: Vec<Vec<Slot>>,  // [NCTX][TSIZE]
     sm: Vec<[u32; 2048]>, // [NCTX][256*8] StateMap: (state | bitpos<<8) -> (prob22<<10 | count)
     sm_idx: [usize; NCTX],
     tmask: [u32; NCTX],  // per-model context-table index mask
@@ -221,17 +221,17 @@ pub struct Cm {
     idx: [usize; NCTX],
     mix_in: [i32; NINPUT],
     mix_in64: [i64; NINPUT], // mix_in pre-widened to i64 for the L1 dot products
-    l1: Vec<Mixer>, // layer-1 specialist mixers (different selection contexts)
-    l2: Mixer,      // layer-2 combiner over the layer-1 logits (last-byte ctx)
-    l2b: Mixer,     // second layer-2 combiner (bit-position ctx)
-    l2c: Mixer,     // third layer-2 combiner (match-state ctx)
-    l2d: Mixer,     // fourth layer-2 combiner (2nd-to-last-byte ctx)
-    l2e: Mixer,     // fifth layer-2 combiner (word ctx)
-    l2f: Mixer,     // sixth layer-2 combiner (high-nibble / opcode-class ctx)
-    l2g: Mixer,     // seventh layer-2 combiner (char-class / text-mode ctx)
-    l2h: Mixer,     // eighth layer-2 combiner (nesting-state ctx)
-    l2i: Mixer,     // ninth layer-2 combiner (byte-above / 2D ctx)
-    l2j: Mixer,     // tenth layer-2 combiner (byte-delta / numeric ctx)
+    l1: Vec<Mixer>,          // layer-1 specialist mixers (different selection contexts)
+    l2: Mixer,               // layer-2 combiner over the layer-1 logits (last-byte ctx)
+    l2b: Mixer,              // second layer-2 combiner (bit-position ctx)
+    l2c: Mixer,              // third layer-2 combiner (match-state ctx)
+    l2d: Mixer,              // fourth layer-2 combiner (2nd-to-last-byte ctx)
+    l2e: Mixer,              // fifth layer-2 combiner (word ctx)
+    l2f: Mixer,              // sixth layer-2 combiner (high-nibble / opcode-class ctx)
+    l2g: Mixer,              // seventh layer-2 combiner (char-class / text-mode ctx)
+    l2h: Mixer,              // eighth layer-2 combiner (nesting-state ctx)
+    l2i: Mixer,              // ninth layer-2 combiner (byte-above / 2D ctx)
+    l2j: Mixer,              // tenth layer-2 combiner (byte-delta / numeric ctx)
     l2_in: [i32; NL1],
     l2_in64: [i64; NL1], // l2_in pre-widened to i64 for the L2 dot products
     buf: Vec<u8>,
@@ -423,11 +423,11 @@ impl Cm {
             Mixer::new(NINPUT, 4096, q),
             Mixer::new(NINPUT, 256, q),
             Mixer::new(NINPUT, 256, q),
-            Mixer::new(NINPUT, 64, q),  // run-length regime selector
-            Mixer::new(NINPUT, 32, q),  // gradient / delta-sign selector
-            Mixer::new(NINPUT, 16, q),  // periodic / record selector
-            Mixer::new(NINPUT, 64, q),  // above-char-class + nest selector
-            Mixer::new(NINPUT, 32, q),  // gradient-magnitude selector
+            Mixer::new(NINPUT, 64, q), // run-length regime selector
+            Mixer::new(NINPUT, 32, q), // gradient / delta-sign selector
+            Mixer::new(NINPUT, 16, q), // periodic / record selector
+            Mixer::new(NINPUT, 64, q), // above-char-class + nest selector
+            Mixer::new(NINPUT, 32, q), // gradient-magnitude selector
         ];
         let l2 = Mixer::new(NL1, 256, L2LR);
         let l2b = Mixer::new(NL1, 256, L2LR);
@@ -1402,7 +1402,11 @@ impl Cm {
             // stretch has 4096 entries; cp+2048 is in [0,4095] (the counter is a
             // contraction toward [0,4095]) and sm>>20 is a 12-bit value, so both
             // indices are always valid — skip the bounds check.
-            self.mix_in[i] = unsafe { *self.stretch16.get_unchecked((slot.cp as i32 + 32768) as usize) };
+            self.mix_in[i] = unsafe {
+                *self
+                    .stretch16
+                    .get_unchecked((slot.cp as i32 + 32768) as usize)
+            };
             let mi = (slot.st as usize) | ((self.bitcount as usize) << 8);
             self.sm_idx[i] = mi;
             // mi <= 2047 by construction (st <= 255 | bitcount<3-bit> << 8).
@@ -1421,7 +1425,11 @@ impl Cm {
                     self.matchlen
                 };
                 self.mm_idx = ((li << 1) | expected_bit) as usize;
-                self.mix_in[MM_BASE] = unsafe { *self.stretch16.get_unchecked(*self.mm_sm.get_unchecked(self.mm_idx) as usize) };
+                self.mix_in[MM_BASE] = unsafe {
+                    *self
+                        .stretch16
+                        .get_unchecked(*self.mm_sm.get_unchecked(self.mm_idx) as usize)
+                };
                 self.mm_used = true;
             } else {
                 self.matchlen = 0;
@@ -1439,7 +1447,11 @@ impl Cm {
                     self.matchlen2
                 };
                 self.mm_idx2 = ((li << 1) | expected_bit) as usize;
-                self.mix_in[MM_BASE + 1] = unsafe { *self.stretch16.get_unchecked(*self.mm_sm2.get_unchecked(self.mm_idx2) as usize) };
+                self.mix_in[MM_BASE + 1] = unsafe {
+                    *self
+                        .stretch16
+                        .get_unchecked(*self.mm_sm2.get_unchecked(self.mm_idx2) as usize)
+                };
                 self.mm_used2 = true;
             } else {
                 self.matchlen2 = 0;
@@ -1457,7 +1469,11 @@ impl Cm {
                     self.matchlen3
                 };
                 self.mm_idx3 = ((li << 1) | expected_bit) as usize;
-                self.mix_in[MM_BASE + 2] = unsafe { *self.stretch16.get_unchecked(*self.mm_sm3.get_unchecked(self.mm_idx3) as usize) };
+                self.mix_in[MM_BASE + 2] = unsafe {
+                    *self
+                        .stretch16
+                        .get_unchecked(*self.mm_sm3.get_unchecked(self.mm_idx3) as usize)
+                };
                 self.mm_used3 = true;
             } else {
                 self.matchlen3 = 0;
@@ -1475,7 +1491,11 @@ impl Cm {
                     self.matchlen4
                 };
                 self.mm_idx4 = ((li << 1) | expected_bit) as usize;
-                self.mix_in[MM_BASE + 3] = unsafe { *self.stretch16.get_unchecked(*self.mm_sm4.get_unchecked(self.mm_idx4) as usize) };
+                self.mix_in[MM_BASE + 3] = unsafe {
+                    *self
+                        .stretch16
+                        .get_unchecked(*self.mm_sm4.get_unchecked(self.mm_idx4) as usize)
+                };
                 self.mm_used4 = true;
             } else {
                 self.matchlen4 = 0;
@@ -1493,7 +1513,11 @@ impl Cm {
                     self.matchlen5
                 };
                 self.mm_idx5 = ((li << 1) | expected_bit) as usize;
-                self.mix_in[MM_BASE + 4] = unsafe { *self.stretch16.get_unchecked(*self.mm_sm5.get_unchecked(self.mm_idx5) as usize) };
+                self.mix_in[MM_BASE + 4] = unsafe {
+                    *self
+                        .stretch16
+                        .get_unchecked(*self.mm_sm5.get_unchecked(self.mm_idx5) as usize)
+                };
                 self.mm_used5 = true;
             } else {
                 self.matchlen5 = 0;
@@ -1511,7 +1535,11 @@ impl Cm {
                     self.matchlen6
                 };
                 self.mm_idx6 = ((li << 1) | expected_bit) as usize;
-                self.mix_in[MM_BASE + 5] = unsafe { *self.stretch16.get_unchecked(*self.mm_sm6.get_unchecked(self.mm_idx6) as usize) };
+                self.mix_in[MM_BASE + 5] = unsafe {
+                    *self
+                        .stretch16
+                        .get_unchecked(*self.mm_sm6.get_unchecked(self.mm_idx6) as usize)
+                };
                 self.mm_used6 = true;
             } else {
                 self.matchlen6 = 0;
@@ -1696,24 +1724,6 @@ impl Cm {
         };
         let gmagsel = dmag | (cls(self.c4) << 3);
         self.l1[21].ctx = (gmagsel) & (self.l1[21].nctx - 1);
-        // vertical-repeat selector: whether the byte one line up equals the last
-        // byte, combined with match activity and the last-byte class.
-        let vrep = if self.above_byte <= 255 && self.above_byte == self.c1 as u32 {
-            1
-        } else {
-            0
-        };
-        let vrepsel = vrep | ((if self.matchlen > 0 { 1 } else { 0 }) << 1) | (cls(self.c4) << 2);
-        // bit-position + match-state selector: the within-byte bit position
-        // combined with whether a match is currently active.
-        let bmsel = (self.c0 as usize & 0x7f) | (if self.matchlen > 0 { 128 } else { 0 });
-        // opcode-trigram selector: the high nibbles of the last three bytes — a
-        // coarse instruction-class trigram (binary), distinct from the existing
-        // single-nibble selector.
-        let optri = (((self.c4 >> 4) & 0xf)
-            | (((self.c4 >> 12) & 0xf) << 2)
-            | (((self.c4 >> 20) & 0xf) << 4)) as usize
-            & 63;
         // delta sign+magnitude selector: the last byte difference bucketed by
         // both sign and coarse magnitude (numeric trend, finer than sign alone).
         let dsm = {
@@ -1732,29 +1742,6 @@ impl Cm {
             (mb | (if neg { 4 } else { 0 })) as usize
         };
         let dsmsel = dsm | (cls(self.c4) << 3);
-        // column-bucket + char-class selector: a layout / text-shape mode keyed
-        // on coarse column position and the last-byte class.
-        let colb = {
-            let c = self.col;
-            if c == 0 {
-                0
-            } else if c < 4 {
-                1
-            } else if c < 8 {
-                2
-            } else if c < 16 {
-                3
-            } else if c < 32 {
-                4
-            } else if c < 64 {
-                5
-            } else if c < 128 {
-                6
-            } else {
-                7
-            }
-        };
-        let wlsel = colb | (cls(self.c4) << 3);
         // Fused layer-1 dot products. All 27 specialists dot the *same* input
         // vector under their own (already-selected) weight row, so iterate the
         // inputs once — loading each mix_in64[i] a single time — and accumulate
@@ -1777,11 +1764,19 @@ impl Cm {
             }
             for k in 0..NL1 {
                 let mut d = (dot[k] >> 16) as i32;
-                if d > 2047 { d = 2047; }
-                if d < -2047 { d = -2047; }
+                if d > 2047 {
+                    d = 2047;
+                }
+                if d < -2047 {
+                    d = -2047;
+                }
                 let mut p = squash_d(&self.squash, d);
-                if p < 1 { p = 1; }
-                if p > 4094 { p = 4094; }
+                if p < 1 {
+                    p = 1;
+                }
+                if p > 4094 {
+                    p = 4094;
+                }
                 self.l1[k].pr = p;
                 self.l2_in[k] = d;
             }
@@ -1828,16 +1823,46 @@ impl Cm {
         let mut dd = [0i64; 10];
         {
             let rows: [&[i32]; 10] = [
-                { let b = self.l2.ctx * NL1; unsafe { self.l2.w.get_unchecked(b..b + NL1) } },
-                { let b = self.l2b.ctx * NL1; unsafe { self.l2b.w.get_unchecked(b..b + NL1) } },
-                { let b = self.l2c.ctx * NL1; unsafe { self.l2c.w.get_unchecked(b..b + NL1) } },
-                { let b = self.l2d.ctx * NL1; unsafe { self.l2d.w.get_unchecked(b..b + NL1) } },
-                { let b = self.l2e.ctx * NL1; unsafe { self.l2e.w.get_unchecked(b..b + NL1) } },
-                { let b = self.l2f.ctx * NL1; unsafe { self.l2f.w.get_unchecked(b..b + NL1) } },
-                { let b = self.l2g.ctx * NL1; unsafe { self.l2g.w.get_unchecked(b..b + NL1) } },
-                { let b = self.l2h.ctx * NL1; unsafe { self.l2h.w.get_unchecked(b..b + NL1) } },
-                { let b = self.l2i.ctx * NL1; unsafe { self.l2i.w.get_unchecked(b..b + NL1) } },
-                { let b = self.l2j.ctx * NL1; unsafe { self.l2j.w.get_unchecked(b..b + NL1) } },
+                {
+                    let b = self.l2.ctx * NL1;
+                    unsafe { self.l2.w.get_unchecked(b..b + NL1) }
+                },
+                {
+                    let b = self.l2b.ctx * NL1;
+                    unsafe { self.l2b.w.get_unchecked(b..b + NL1) }
+                },
+                {
+                    let b = self.l2c.ctx * NL1;
+                    unsafe { self.l2c.w.get_unchecked(b..b + NL1) }
+                },
+                {
+                    let b = self.l2d.ctx * NL1;
+                    unsafe { self.l2d.w.get_unchecked(b..b + NL1) }
+                },
+                {
+                    let b = self.l2e.ctx * NL1;
+                    unsafe { self.l2e.w.get_unchecked(b..b + NL1) }
+                },
+                {
+                    let b = self.l2f.ctx * NL1;
+                    unsafe { self.l2f.w.get_unchecked(b..b + NL1) }
+                },
+                {
+                    let b = self.l2g.ctx * NL1;
+                    unsafe { self.l2g.w.get_unchecked(b..b + NL1) }
+                },
+                {
+                    let b = self.l2h.ctx * NL1;
+                    unsafe { self.l2h.w.get_unchecked(b..b + NL1) }
+                },
+                {
+                    let b = self.l2i.ctx * NL1;
+                    unsafe { self.l2i.w.get_unchecked(b..b + NL1) }
+                },
+                {
+                    let b = self.l2j.ctx * NL1;
+                    unsafe { self.l2j.w.get_unchecked(b..b + NL1) }
+                },
             ];
             for i in 0..NL1 {
                 let xi = self.l2_in64[i];
@@ -1850,21 +1875,36 @@ impl Cm {
         let mut dv = [0i32; 10];
         for j in 0..10 {
             let mut v = (dd[j] >> 16) as i32;
-            if v > 2047 { v = 2047; }
-            if v < -2047 { v = -2047; }
+            if v > 2047 {
+                v = 2047;
+            }
+            if v < -2047 {
+                v = -2047;
+            }
             dv[j] = v;
             dsum += v;
         }
         let mut prs = [0i32; 10];
         for j in 0..10 {
             let mut pp = squash_d(&self.squash, dv[j]);
-            if pp < 1 { pp = 1; }
-            if pp > 4094 { pp = 4094; }
+            if pp < 1 {
+                pp = 1;
+            }
+            if pp > 4094 {
+                pp = 4094;
+            }
             prs[j] = pp;
         }
-        self.l2.pr = prs[0]; self.l2b.pr = prs[1]; self.l2c.pr = prs[2]; self.l2d.pr = prs[3];
-        self.l2e.pr = prs[4]; self.l2f.pr = prs[5]; self.l2g.pr = prs[6]; self.l2h.pr = prs[7];
-        self.l2i.pr = prs[8]; self.l2j.pr = prs[9];
+        self.l2.pr = prs[0];
+        self.l2b.pr = prs[1];
+        self.l2c.pr = prs[2];
+        self.l2d.pr = prs[3];
+        self.l2e.pr = prs[4];
+        self.l2f.pr = prs[5];
+        self.l2g.pr = prs[6];
+        self.l2h.pr = prs[7];
+        self.l2i.pr = prs[8];
+        self.l2j.pr = prs[9];
         // Squash the combined logit straight to 16-bit and run the whole SSE/APM
         // chain at 16-bit precision (the calibration tables are ~16-bit), so no
         // stage re-quantizes the probability to the 12-bit 1/4096 grid.
@@ -1937,23 +1977,28 @@ impl Cm {
         }
         if self.mm_used2 {
             let v = self.mm_sm2[self.mm_idx2] as i32;
-            self.mm_sm2[self.mm_idx2] = (v + (((if bit != 0 { 65535 } else { 0 }) - v) >> 6)) as u16;
+            self.mm_sm2[self.mm_idx2] =
+                (v + (((if bit != 0 { 65535 } else { 0 }) - v) >> 6)) as u16;
         }
         if self.mm_used3 {
             let v = self.mm_sm3[self.mm_idx3] as i32;
-            self.mm_sm3[self.mm_idx3] = (v + (((if bit != 0 { 65535 } else { 0 }) - v) >> 5)) as u16;
+            self.mm_sm3[self.mm_idx3] =
+                (v + (((if bit != 0 { 65535 } else { 0 }) - v) >> 5)) as u16;
         }
         if self.mm_used4 {
             let v = self.mm_sm4[self.mm_idx4] as i32;
-            self.mm_sm4[self.mm_idx4] = (v + (((if bit != 0 { 65535 } else { 0 }) - v) >> 1)) as u16;
+            self.mm_sm4[self.mm_idx4] =
+                (v + (((if bit != 0 { 65535 } else { 0 }) - v) >> 1)) as u16;
         }
         if self.mm_used5 {
             let v = self.mm_sm5[self.mm_idx5] as i32;
-            self.mm_sm5[self.mm_idx5] = (v + (((if bit != 0 { 65535 } else { 0 }) - v) >> 5)) as u16;
+            self.mm_sm5[self.mm_idx5] =
+                (v + (((if bit != 0 { 65535 } else { 0 }) - v) >> 5)) as u16;
         }
         if self.mm_used6 {
             let v = self.mm_sm6[self.mm_idx6] as i32;
-            self.mm_sm6[self.mm_idx6] = (v + (((if bit != 0 { 65535 } else { 0 }) - v) >> 5)) as u16;
+            self.mm_sm6[self.mm_idx6] =
+                (v + (((if bit != 0 { 65535 } else { 0 }) - v) >> 5)) as u16;
         }
         // Fused layer-1 weight update (mirror of the fused dot in `predict`): all
         // 27 specialists train on the same input vector, so load each mix_in[i]
@@ -1991,8 +2036,16 @@ impl Cm {
             let mut rowp: [*mut i32; 10] = [core::ptr::null_mut::<i32>(); 10];
             {
                 let ms: [&mut Mixer; 10] = [
-                    &mut self.l2, &mut self.l2b, &mut self.l2c, &mut self.l2d, &mut self.l2e,
-                    &mut self.l2f, &mut self.l2g, &mut self.l2h, &mut self.l2i, &mut self.l2j,
+                    &mut self.l2,
+                    &mut self.l2b,
+                    &mut self.l2c,
+                    &mut self.l2d,
+                    &mut self.l2e,
+                    &mut self.l2f,
+                    &mut self.l2g,
+                    &mut self.l2h,
+                    &mut self.l2i,
+                    &mut self.l2j,
                 ];
                 for (j, m) in ms.into_iter().enumerate() {
                     errlr[j] = ((bit << 12) - m.pr) * m.lr;

@@ -93,6 +93,8 @@ Leaderboard of recorded submissions. Full narratives live in
 | 0086 | 2026-06-18 | @10d9e | 575678 | +3446 | +16.77% | `ec1d979` | [0086](history/entries/0086--10d9e.md) | perf: trim NL1 13->11 (mixer WORK) (#102) |
 | 0087 | 2026-06-18 | @10d9e | 576105 | +3873 | +16.71% | `42e5846` | [0087](history/entries/0087--10d9e.md) | perf: trim NL1 11->9 (mixer WORK) (#103) |
 | 0088 | 2026-06-18 | @10d9e | 576105 | +3873 | +16.71% | `c558b58` | [0088](history/entries/0088--10d9e.md) | perf: remove 18 dead follow tables left by the NCTX trims (output-neutral) (#1… |
+| 0089 | 2026-06-19 | @10d9e | 572470 | +238 | +17.24% | `19220f0` | [0089](history/entries/0089--10d9e.md) | Forks entry 0080 (572799 @ 5.14G WORK / 1.62G MEMCOST) and recovers -329 SCORE a… |
+| 0090 | 2026-06-19 | @10d9e | 572407 | +175 | +17.25% | `048c7eb` | [0090](history/entries/0090--10d9e.md) | Builds on entry 0089 (tuned fork of 0080). The DMC clone-threshold vein the fron… |
 
 **Current record: 572232** (@10d9e, entry 0078)
 
