@@ -252,7 +252,7 @@ table.leaderboard {
   border-collapse: collapse;
   table-layout: fixed;
   font-size: 0.86rem;
-  min-width: 1240px;
+  min-width: 980px;
 }
 
 col.w-id { width: 76px; }
@@ -263,9 +263,6 @@ col.w-delta { width: 112px; }
 col.w-zstd { width: 84px; }
 col.w-work { width: 92px; }
 col.w-memcost { width: 92px; }
-col.w-lines { width: 84px; }
-col.w-heappeak { width: 96px; }
-col.w-heapchurn { width: 100px; }
 col.w-open { width: 96px; }
 
 table.leaderboard th,
@@ -327,10 +324,7 @@ table.leaderboard tbody tr.non-winning td.c-id {
 .c-score,
 .c-zstd,
 .c-work,
-.c-memcost,
-.c-lines,
-.c-heappeak,
-.c-heapchurn {
+.c-memcost {
   overflow: visible;
   text-overflow: clip;
 }
@@ -407,19 +401,12 @@ table.leaderboard tbody tr.score-leader td.c-author .aname {
 }
 
 .c-work,
-.c-memcost,
-.c-lines,
-.c-heappeak,
-.c-heapchurn {
+.c-memcost {
   color: rgba(255, 255, 255, 0.5);
   font-family: var(--font-mono);
   font-size: 10px;
   font-variant-numeric: tabular-nums;
 }
-
-/* Non-scoring diagnostic columns — dimmer than the scoring metrics. */
-table.leaderboard thead th.diag { color: rgba(255, 255, 255, 0.34); }
-table.leaderboard tbody td.diag { color: rgba(255, 255, 255, 0.38); }
 
 .badge {
   display: inline-block;

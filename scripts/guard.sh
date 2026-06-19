@@ -34,11 +34,9 @@ if ! grep -q 'pub fn compress(input: &\[u8\]) -> Vec<u8>' src/algorithm/mod.rs \
   exit 1
 fi
 
-# A submission must not register its own allocator: a #[global_allocator] in
-# src/algorithm/ shadows the metering allocators and disables the heap meters.
+# A submission must not register its own allocator in the algorithm surface.
 if grep -rqE '#\[\s*global_allocator\s*\]' src/algorithm/ 2>/dev/null; then
   echo "BOUNDARY VIOLATION — src/algorithm/ must not declare a #[global_allocator]"
-  echo "(it would shadow the metering allocator and disable HEAP_PEAK/HEAP_CHURN)."
   exit 1
 fi
 

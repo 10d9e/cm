@@ -10,9 +10,6 @@ crate-type = ["cdylib"]
 [dependencies]
 cm = { path = "../.." }
 
-[features]
-heap = []
-
 [profile.release]
 opt-level = 3
 panic = "abort"

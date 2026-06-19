@@ -1,7 +1,6 @@
-//! Shared constants, wasm instrumentation, and cache/line tracking for the
-//! frozen metrics harness. Lives outside `src/algorithm/`.
+//! Shared constants, wasm instrumentation, and cache tracking for the frozen
+//! metrics harness. Lives outside `src/algorithm/`.
 
-use std::collections::HashSet;
 use walrus::ir::*;
 use walrus::{FunctionId, FunctionKind, LocalFunction, LocalId, ValType};
 use wasmtime::{Config, Engine, Instance, Linker, Module, Store};
@@ -64,7 +63,7 @@ impl Cache {
     }
 }
 
-/// Combined MEMCOST cache model + LINES distinct-line counter.
+/// MEMCOST cache model state.
 pub struct AccessTracker {
     l1: Cache,
     l2: Cache,
@@ -74,7 +73,6 @@ pub struct AccessTracker {
     pub l1m: u64,
     pub l2m: u64,
     pub l3m: u64,
-    lines: HashSet<u64>,
 }
 
 impl AccessTracker {
@@ -88,7 +86,6 @@ impl AccessTracker {
             l1m: 0,
             l2m: 0,
             l3m: 0,
-            lines: HashSet::new(),
         }
     }
 
@@ -118,7 +115,6 @@ impl AccessTracker {
         let mut l = first;
         loop {
             self.touch_cache(l);
-            self.lines.insert(l);
             if l == last {
                 break;
             }
@@ -128,10 +124,6 @@ impl AccessTracker {
 
     pub fn memcost(&self) -> u64 {
         self.l1m * PEN_L1 + self.l2m * PEN_L2 + self.l3m * PEN_L3
-    }
-
-    pub fn distinct_lines(&self) -> u64 {
-        self.lines.len() as u64
     }
 }
 
@@ -280,7 +272,6 @@ fn instrument(module: &mut walrus::Module) {
     }
 }
 
-/// Instrument wasm loads/stores for combined MEMCOST + LINES tracking.
 pub fn instrument_wasm(wasm: &[u8]) -> Vec<u8> {
     let mut module = walrus::Module::from_buffer(wasm).expect("parse wasm");
     instrument(&mut module);
@@ -328,13 +319,13 @@ pub fn measure_work(wasm: &[u8]) -> FuelRun {
     }
 }
 
-pub struct MemLinesMeter {
+pub struct MemMeter {
     engine: Engine,
     module: Module,
     linker: Linker<AccessTracker>,
 }
 
-impl MemLinesMeter {
+impl MemMeter {
     pub fn new(wasm: &[u8]) -> Self {
         let instrumented = instrument_wasm(wasm);
         let engine = Engine::new(&Config::new()).expect("engine");
@@ -349,7 +340,7 @@ impl MemLinesMeter {
                 },
             )
             .expect("link track");
-        MemLinesMeter {
+        MemMeter {
             engine,
             module,
             linker,
@@ -367,69 +358,5 @@ impl MemLinesMeter {
             .expect(EXPORT_HE);
         f.call(&mut store, prefix).expect("call");
         store.into_data()
-    }
-}
-
-pub fn measure_access(prefix: u32, instrumented: &Module) -> AccessTracker {
-    let engine = Engine::new(&Config::new()).expect("engine");
-    let mut linker = Linker::new(&engine);
-    linker
-        .func_wrap(
-            "mem",
-            "track",
-            |mut c: wasmtime::Caller<AccessTracker>, addr: i32, size: i32, _rw: i32| {
-                c.data_mut().access(addr as u32, size as u32);
-            },
-        )
-        .expect("link track");
-    let mut store = Store::new(&engine, AccessTracker::new());
-    let inst = linker
-        .instantiate(&mut store, instrumented)
-        .expect("instantiate");
-    let f = inst
-        .get_typed_func::<u32, u32>(&mut store, EXPORT_HE)
-        .expect(EXPORT_HE);
-    f.call(&mut store, prefix).expect("call");
-    store.into_data()
-}
-
-pub fn measure_mem_and_lines(wasm: &[u8]) -> (AccessTracker, AccessTracker) {
-    let instrumented = instrument_wasm(wasm);
-    let engine = Engine::new(&Config::new()).expect("engine");
-    let module = Module::from_binary(&engine, &instrumented).expect("parse instrumented");
-    let full = measure_access(FULL, &module);
-    let half = measure_access(HALF, &module);
-    (full, half)
-}
-
-pub struct HeapRun {
-    pub full: u64,
-    pub half: u64,
-    pub churn: u64,
-}
-
-pub fn measure_heap_churn(heap_wasm: &[u8]) -> HeapRun {
-    let engine = Engine::default();
-    let module = Module::from_binary(&engine, heap_wasm).expect("parse heap wasm");
-    let measure = |prefix: u32| -> u64 {
-        let mut store = Store::new(&engine, ());
-        let instance = Instance::new(&mut store, &module, &[]).expect("instantiate");
-        let compress = instance
-            .get_typed_func::<u32, u32>(&mut store, EXPORT_PREFIX)
-            .expect("compress_prefix");
-        let heap = instance
-            .get_typed_func::<(), u64>(&mut store, "cm_heap_bytes")
-            .expect("cm_heap_bytes — build the shim with --features heap");
-        let h0 = heap.call(&mut store, ()).unwrap();
-        compress.call(&mut store, prefix).expect("call");
-        let h1 = heap.call(&mut store, ()).unwrap();
-        h1 - h0
-    };
-    let full = measure(FULL);
-    let half = measure(HALF);
-    HeapRun {
-        full,
-        half,
-        churn: full.saturating_sub(half),
     }
 }

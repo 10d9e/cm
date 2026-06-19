@@ -4,9 +4,6 @@ members = [
     "common",
     "host",
     "memmeter",
-    "lines",
-    "heappeak",
-    "heapchurn",
     "all",
 ]
 resolver = "2"

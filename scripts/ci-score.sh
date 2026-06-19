@@ -50,23 +50,16 @@ echo "== evaluate (authoritative score; runs untrusted competitor code) =="
 bash scripts/evaluate.sh --no-guard
 
 # Deterministic complexity / memory metrics (best-effort; never blocks recording).
-# One build + one instrumentation pass for WORK, MEMCOST, LINES, HEAP_PEAK,
-# HEAP_CHURN via scripts/measure-all.sh.
+# One wasm build + one process for WORK and MEMCOST via scripts/measure-all.sh.
 work=""
 memcost=""
-lines=""
-heap_peak=""
-heap_churn=""
-echo "== metrics (WORK, MEMCOST, LINES, HEAP_PEAK, HEAP_CHURN) =="
+echo "== metrics (WORK, MEMCOST) =="
 if out="$(bash scripts/measure-all.sh 2>&1)"; then
   echo "$out"
   work="$(printf '%s\n' "$out" | sed -n 's/^WORK: \([0-9][0-9]*\).*/\1/p' | tail -1)"
   memcost="$(printf '%s\n' "$out" | sed -n 's/^MEMCOST: \([0-9][0-9]*\).*/\1/p' | tail -1)"
-  lines="$(printf '%s\n' "$out" | sed -n 's/^LINES: \([0-9]*\).*/\1/p' | tail -1)"
-  heap_peak="$(printf '%s\n' "$out" | sed -n 's/^HEAP_PEAK: \([0-9]*\).*/\1/p' | tail -1)"
-  heap_churn="$(printf '%s\n' "$out" | sed -n 's/^HEAP_CHURN: \([0-9]*\).*/\1/p' | tail -1)"
 else
-  echo "scorekeeper: metrics unavailable; recording without WORK/MEMCOST/LINES/HEAP_*"
+  echo "scorekeeper: metrics unavailable; recording without WORK/MEMCOST"
 fi
 
 # PR metadata. The token here is the read-only default GITHUB_TOKEN.
@@ -98,9 +91,6 @@ record_args=(--ci --author "$author" --model "$model" --note "$note" --diff-base
 [[ -n "$attempts" ]] && record_args+=(--attempts "$attempts")
 [[ -n "$work" ]] && record_args+=(--work "$work")
 [[ -n "$memcost" ]] && record_args+=(--memcost "$memcost")
-[[ -n "$lines" ]] && record_args+=(--lines "$lines")
-[[ -n "$heap_peak" ]] && record_args+=(--heap-peak "$heap_peak")
-[[ -n "$heap_churn" ]] && record_args+=(--heap-churn "$heap_churn")
 
 echo "== record submission (generate ledger files) =="
 rec_out="$(bash scripts/record.sh "${record_args[@]}")"
