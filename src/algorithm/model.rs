@@ -6,6 +6,7 @@
 //! lossless on all inputs and the predict/update sequence stays identical
 //! between encode and decode.
 
+use super::ctw::Ctw;
 use super::dmc::Dmc;
 use super::tables::{build, build16, squash16_d, squash_d};
 
@@ -22,7 +23,7 @@ const CTW_IN: usize = 2 * NCTX + 8; // Context Tree Weighting prediction
 const NINPUT: usize = 2 * NCTX + 9;
 const TBITS: u32 = 20; // default per-model context-table size (2^TBITS slots)
 const MIXCTX: usize = 16384;
-const NL1: usize = 19; // perf trim 22->19
+const NL1: usize = 22; // trimmed 27->22 (WORK reduction, within record headroom)
 const L1LR: i32 = 8; // layer-1 specialist learning rate
 const L2LR: i32 = 10; // layer-2 combiner learning rate
 const MIX3CTX: usize = 8192; // order-2 specialist rows
@@ -284,7 +285,7 @@ pub struct Cm {
     apm4: Apm,
     dmc: Dmc,
     dmc2: Dmc,
-    dmc3: Dmc,
+    ctw: Ctw,
     c0: i32,
     bitcount: i32,
     c4: u32,
@@ -424,6 +425,9 @@ impl Cm {
             Mixer::new(NINPUT, 256, q),
             Mixer::new(NINPUT, 64, q),  // run-length regime selector
             Mixer::new(NINPUT, 32, q),  // gradient / delta-sign selector
+            Mixer::new(NINPUT, 16, q),  // periodic / record selector
+            Mixer::new(NINPUT, 64, q),  // above-char-class + nest selector
+            Mixer::new(NINPUT, 32, q),  // gradient-magnitude selector
         ];
         let l2 = Mixer::new(NL1, 256, L2LR);
         let l2b = Mixer::new(NL1, 256, L2LR);
@@ -530,7 +534,7 @@ impl Cm {
             apm4,
             dmc: Dmc::new(1, 1),
             dmc2: Dmc::new(2, 2),
-            dmc3: Dmc::new(3, 3),
+            ctw: Ctw::new(),
             c0: 1,
             bitcount: 0,
             c4: 0,
@@ -1516,7 +1520,7 @@ impl Cm {
         // DMC variable-order Markov prediction — one extra mixer input.
         self.mix_in[DMC_IN] = self.dmc.predict(&self.stretch);
         self.mix_in[DMC2_IN] = self.dmc2.predict(&self.stretch);
-        self.mix_in[CTW_IN] = self.dmc3.predict(&self.stretch); // 3rd DMC in the freed CTW slot
+        self.mix_in[CTW_IN] = self.ctw.predict(&self.stretch);
         // Pre-widen the full input vector to i64 once; all 27 layer-1 mixers dot
         // the same vector, so this lifts the per-element sign-extend out of the
         // hot loop (run 27x per bit) into a single pass.
@@ -1657,11 +1661,12 @@ impl Cm {
         // specialise on the coarse value of the byte one period back.
         let rgl = self.rlen;
         let rec_ok_l = self.rcount > 8 && rgl >= 2 && rgl < self.pos;
-        let _recsel = if rec_ok_l {
+        let recsel = if rec_ok_l {
             1 + ((self.b(self.pos - rgl) as usize) >> 5)
         } else {
             0
         };
+        self.l1[19].ctx = (recsel) & (self.l1[19].nctx - 1);
         // above-char-class + nesting selector: a 2D / structural mode keyed on
         // the class of the char one line up and the current bracket depth.
         let aboveclass = if self.above_byte > 255 {
@@ -1669,7 +1674,8 @@ impl Cm {
         } else {
             cls(self.above_byte)
         };
-        let _abovesel = aboveclass | ((self.nest_depth & 7) << 3);
+        let abovesel = aboveclass | ((self.nest_depth & 7) << 3);
+        self.l1[20].ctx = (abovesel) & (self.l1[20].nctx - 1);
         // gradient-magnitude selector: bucket the magnitude of the last byte
         // difference (flat / small / medium / large) with the last-byte class —
         // a smooth-vs-noisy numeric mode, distinct from the delta-sign selector.
@@ -1688,7 +1694,8 @@ impl Cm {
                 4
             }
         };
-        let _gmagsel = dmag | (cls(self.c4) << 3);
+        let gmagsel = dmag | (cls(self.c4) << 3);
+        self.l1[21].ctx = (gmagsel) & (self.l1[21].nctx - 1);
         // vertical-repeat selector: whether the byte one line up equals the last
         // byte, combined with match activity and the last-byte class.
         let vrep = if self.above_byte <= 255 && self.above_byte == self.c1 as u32 {
@@ -1696,14 +1703,14 @@ impl Cm {
         } else {
             0
         };
-        let _vrepsel = vrep | ((if self.matchlen > 0 { 1 } else { 0 }) << 1) | (cls(self.c4) << 2);
+        let vrepsel = vrep | ((if self.matchlen > 0 { 1 } else { 0 }) << 1) | (cls(self.c4) << 2);
         // bit-position + match-state selector: the within-byte bit position
         // combined with whether a match is currently active.
-        let _bmsel = (self.c0 as usize & 0x7f) | (if self.matchlen > 0 { 128 } else { 0 });
+        let bmsel = (self.c0 as usize & 0x7f) | (if self.matchlen > 0 { 128 } else { 0 });
         // opcode-trigram selector: the high nibbles of the last three bytes — a
         // coarse instruction-class trigram (binary), distinct from the existing
         // single-nibble selector.
-        let _optri = (((self.c4 >> 4) & 0xf)
+        let optri = (((self.c4 >> 4) & 0xf)
             | (((self.c4 >> 12) & 0xf) << 2)
             | (((self.c4 >> 20) & 0xf) << 4)) as usize
             & 63;
@@ -1747,7 +1754,7 @@ impl Cm {
                 7
             }
         };
-        let _wlsel = colb | (cls(self.c4) << 3);
+        let wlsel = colb | (cls(self.c4) << 3);
         // Fused layer-1 dot products. All 27 specialists dot the *same* input
         // vector under their own (already-selected) weight row, so iterate the
         // inputs once — loading each mix_in64[i] a single time — and accumulate
@@ -1923,8 +1930,7 @@ impl Cm {
         self.apm4.update(bit);
         self.dmc.update(bit);
         self.dmc2.update(bit);
-        self.dmc3.update(bit);
-        // CTW removed (perf)
+        self.ctw.update(bit);
         if self.mm_used {
             let v = self.mm_sm[self.mm_idx] as i32;
             self.mm_sm[self.mm_idx] = (v + (((if bit != 0 { 65535 } else { 0 }) - v) >> 6)) as u16;
