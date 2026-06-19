@@ -19,7 +19,9 @@ const MM_BASE: usize = 2 * NCTX;
 const DMC_IN: usize = 2 * NCTX + 6; // DMC variable-order prediction (one extra input)
 const DMC2_IN: usize = 2 * NCTX + 7; // second, slow-cloning DMC prediction
 const CTW_IN: usize = 2 * NCTX + 8; // Context Tree Weighting prediction
-const NINPUT: usize = 2 * NCTX + 9;
+const DMC4_IN: usize = 2 * NCTX + 9; // 4th DMC
+const DMC5_IN: usize = 2 * NCTX + 10; // 5th DMC
+const NINPUT: usize = 2 * NCTX + 11;
 const TBITS: u32 = 20; // default per-model context-table size (2^TBITS slots)
 const MIXCTX: usize = 16384;
 const NL1: usize = 19; // perf trim 22->19
@@ -285,6 +287,8 @@ pub struct Cm {
     dmc: Dmc,
     dmc2: Dmc,
     dmc3: Dmc,
+    dmc4: Dmc,
+    dmc5: Dmc,
     c0: i32,
     bitcount: i32,
     c4: u32,
@@ -531,6 +535,8 @@ impl Cm {
             dmc: Dmc::new(1, 1),
             dmc2: Dmc::new(2, 2),
             dmc3: Dmc::new(3, 3),
+            dmc4: Dmc::new(5, 5),
+            dmc5: Dmc::new(8, 8),
             c0: 1,
             bitcount: 0,
             c4: 0,
@@ -1517,6 +1523,8 @@ impl Cm {
         self.mix_in[DMC_IN] = self.dmc.predict(&self.stretch);
         self.mix_in[DMC2_IN] = self.dmc2.predict(&self.stretch);
         self.mix_in[CTW_IN] = self.dmc3.predict(&self.stretch); // 3rd DMC in the freed CTW slot
+        self.mix_in[DMC4_IN] = self.dmc4.predict(&self.stretch);
+        self.mix_in[DMC5_IN] = self.dmc5.predict(&self.stretch);
         // Pre-widen the full input vector to i64 once; all 27 layer-1 mixers dot
         // the same vector, so this lifts the per-element sign-extend out of the
         // hot loop (run 27x per bit) into a single pass.
@@ -1924,6 +1932,8 @@ impl Cm {
         self.dmc.update(bit);
         self.dmc2.update(bit);
         self.dmc3.update(bit);
+        self.dmc4.update(bit);
+        self.dmc5.update(bit);
         // CTW removed (perf)
         if self.mm_used {
             let v = self.mm_sm[self.mm_idx] as i32;
