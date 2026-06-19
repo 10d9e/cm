@@ -82,7 +82,18 @@ Leaderboard of recorded submissions. Full narratives live in
 | 0075 | 2026-06-17 | @10d9e | 572423 | 0 bytes, -201434556 WORK (new record) | +17.24% | `d4bcf54` | [0075](history/entries/0075--10d9e.md) | Output-neutral WORK and MEMCOST reduction in the Context Tree Weighting model. U… |
 | 0076 | 2026-06-18 | @10d9e | 575829 | +3406 | +16.75% | `76d585a` | [0076](history/entries/0076--10d9e.md) | Aggressive model trimming to explore the speed/size Pareto frontier. Removed CTW… |
 | 0077 | 2026-06-18 | @10d9e | 575394 | +2971 | +16.81% | `f2bea8e` | [0077](history/entries/0077--10d9e.md) | WORK/MEMCOST-neutral SCORE improvement over the lean non-winning entry 0076 (the… |
+| 0078 | 2026-06-18 | @10d9e | 572232 | -191 (new record) | +17.27% | `bcf2b95` | [0078](history/entries/0078--10d9e.md) | perf: 16-bit input precision + CTW W_EST prior — NEW RECORD 572232, leaner (#9… |
+| 0079 | 2026-06-18 | @10d9e | 572828 | +596 | +17.19% | `f358ca4` | [0079](history/entries/0079--10d9e.md) | perf: remove CTW from the record model (WORK -1.20G, MEMCOST -0.55G) (#95) |
+| 0080 | 2026-06-18 | @10d9e | 572799 | +567 | +17.19% | `c81bf42` | [0080](history/entries/0080--10d9e.md) | perf: trim NL1 22->19 (WORK 5.66G->5.14G) (#96) |
+| 0081 | 2026-06-18 | @10d9e | 572965 | +733 | +17.17% | `719ff3c` | [0081](history/entries/0081--10d9e.md) | perf: trim NL1 19->16 (mixer WORK) (#97) |
+| 0082 | 2026-06-18 | @10d9e | 573659 | +1427 | +17.07% | `31ba9be` | [0082](history/entries/0082--10d9e.md) | perf: trim NL1 16->13 (mixer WORK) (#98) |
+| 0083 | 2026-06-18 | @10d9e | 574109 | +1877 | +17.00% | `5e5b000` | [0083](history/entries/0083--10d9e.md) | perf: trim NCTX 106->96 (drop 10 tail context models) (#99) |
+| 0084 | 2026-06-18 | @10d9e | 575137 | +2905 | +16.85% | `4028a1f` | [0084](history/entries/0084--10d9e.md) | perf: trim NCTX 96->86 (drop 10 more context models) (#100) |
+| 0085 | 2026-06-18 | @10d9e | 575515 | +3283 | +16.80% | `003cd56` | [0085](history/entries/0085--10d9e.md) | perf: trim NCTX 86->81 (drop 5 more context models) (#101) |
+| 0086 | 2026-06-18 | @10d9e | 575678 | +3446 | +16.77% | `ec1d979` | [0086](history/entries/0086--10d9e.md) | perf: trim NL1 13->11 (mixer WORK) (#102) |
+| 0087 | 2026-06-18 | @10d9e | 576105 | +3873 | +16.71% | `42e5846` | [0087](history/entries/0087--10d9e.md) | perf: trim NL1 11->9 (mixer WORK) (#103) |
+| 0088 | 2026-06-18 | @10d9e | 576105 | +3873 | +16.71% | `c558b58` | [0088](history/entries/0088--10d9e.md) | perf: remove 18 dead follow tables left by the NCTX trims (output-neutral) (#1… |
 
-**Current record: 572423** (@10d9e, entry 0075)
+**Current record: 572232** (@10d9e, entry 0078)
 
 Ledger updates are **CI-only** — see [`.github/workflows/scorekeeper.yml`](.github/workflows/scorekeeper.yml).
