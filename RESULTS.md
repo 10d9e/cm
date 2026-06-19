@@ -95,7 +95,8 @@ Leaderboard of recorded submissions. Full narratives live in
 | 0088 | 2026-06-18 | @10d9e | 576105 | +3873 | +16.71% | `c558b58` | [0088](history/entries/0088--10d9e.md) | perf: remove 18 dead follow tables left by the NCTX trims (output-neutral) (#1… |
 | 0089 | 2026-06-19 | @10d9e | 572470 | +238 | +17.24% | `19220f0` | [0089](history/entries/0089--10d9e.md) | Forks entry 0080 (572799 @ 5.14G WORK / 1.62G MEMCOST) and recovers -329 SCORE a… |
 | 0090 | 2026-06-19 | @10d9e | 572407 | +175 | +17.25% | `048c7eb` | [0090](history/entries/0090--10d9e.md) | Builds on entry 0089 (tuned fork of 0080). The DMC clone-threshold vein the fron… |
+| 0091 | 2026-06-19 | @10d9e | 572064 | -168 (new record) | +17.30% | `1e25c52` | [0091](history/entries/0091--10d9e.md) | Re-records the new record (SCORE 572060, beating 572232 by -172). The record alg… |
 
-**Current record: 572232** (@10d9e, entry 0078)
+**Current record: 572064** (@10d9e, entry 0091)
 
 Ledger updates are **CI-only** — see [`.github/workflows/scorekeeper.yml`](.github/workflows/scorekeeper.yml).
