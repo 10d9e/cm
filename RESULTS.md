@@ -96,7 +96,8 @@ Leaderboard of recorded submissions. Full narratives live in
 | 0089 | 2026-06-19 | @10d9e | 572470 | +238 | +17.24% | `19220f0` | [0089](history/entries/0089--10d9e.md) | Forks entry 0080 (572799 @ 5.14G WORK / 1.62G MEMCOST) and recovers -329 SCORE a… |
 | 0090 | 2026-06-19 | @10d9e | 572407 | +175 | +17.25% | `048c7eb` | [0090](history/entries/0090--10d9e.md) | Builds on entry 0089 (tuned fork of 0080). The DMC clone-threshold vein the fron… |
 | 0091 | 2026-06-19 | @10d9e | 572064 | -168 (new record) | +17.30% | `1e25c52` | [0091](history/entries/0091--10d9e.md) | Re-records the new record (SCORE 572060, beating 572232 by -172). The record alg… |
+| 0092 | 2026-06-22 | @abipalli | 571972 | -92 (new record) | +17.31% | `1547277` | [0092](history/entries/0092--abipalli.md) | perf: transplant proven 5-DMC ensemble (1,2,3,5,8) onto the record — SCORE 572… |
 
-**Current record: 572064** (@10d9e, entry 0091)
+**Current record: 571972** (@abipalli, entry 0092)
 
 Ledger updates are **CI-only** — see [`.github/workflows/scorekeeper.yml`](.github/workflows/scorekeeper.yml).
