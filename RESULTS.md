@@ -99,7 +99,8 @@ Leaderboard of recorded submissions. Full narratives live in
 | 0092 | 2026-06-22 | @abipalli | 571972 | -92 (new record) | +17.31% | `1547277` | [0092](history/entries/0092--abipalli.md) | perf: transplant proven 5-DMC ensemble (1,2,3,5,8) onto the record — SCORE 572… |
 | 0093 | 2026-06-23 | @abipalli | 571565 | -407 (new record) | +17.37% | `7892d1a` | [0093](history/entries/0093--abipalli.md) | perf: shrink run-map tables 2^22 -> 2^20 (memory) — SCORE 571565 (-407), recor… |
 | 0094 | 2026-06-23 | @abipalli | 571544 | -21 (new record) | +17.37% | `3e7e7c6` | [0094](history/entries/0094--abipalli.md) | perf: record the 27-context run-map bank, faster — SCORE 571544 (-21), WORK 7.… |
+| 0095 | 2026-06-23 | @abipalli | 571544 | 0 bytes, -24755055 WORK (new record) | +17.37% | `140a07b` | [0095](history/entries/0095--abipalli.md) | perf: CTW transcendental skips (output-neutral) — WORK 5.795G -> 5.771G (-24.8… |
 
-**Current record: 571544** (@abipalli, entry 0094)
+**Current record: 571544** (@abipalli, entry 0095)
 
 Ledger updates are **CI-only** — see [`.github/workflows/scorekeeper.yml`](.github/workflows/scorekeeper.yml).
