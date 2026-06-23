@@ -23,7 +23,20 @@ const CTW_IN: usize = 2 * NCTX + 8; // Context Tree Weighting prediction
 const DMC3_IN: usize = 2 * NCTX + 9; // third DMC (clone threshold 3) — was a dead zero slot
 const DMC4_IN: usize = 2 * NCTX + 10; // fourth DMC (clone threshold 5) — was a dead zero slot
 const DMC5_IN: usize = 2 * NCTX + 11; // fifth DMC (clone threshold 8, slow/stable, low-order)
-const NINPUT: usize = 2 * NCTX + 12;
+// paq8-style RunContextMap bank: one run map per listed context model, sharing
+// that model's byte-context hash (so each context carries BOTH a bit-history
+// StateMap and a run map, exactly as paq8's ContextMap does). Each remembers the
+// last byte that followed the context and how many times in a row it has, and
+// predicts that byte's bits with confidence learned per (run-length, bit).
+const NRUN: usize = 27;
+// orders 2-9, word; high orders 11/10/13/16; word bi/tri-grams; sparse b2-3,
+// stride-2/3/4, gap(1,3)/(1,4); + gap(1,5), word+literal, stride-5/6/7, order-5-alt.
+const RUN_CTX: [usize; NRUN] = [
+    2, 3, 4, 5, 6, 7, 9, 10, 11, 18, 26, 27, 28, 23, 25, 8, 19, 29, 30, 20, 21, 22, 24, 31, 32, 33,
+    17,
+];
+const RUN_BASE: usize = 2 * NCTX + 12; // first run-map mixer input
+const NINPUT: usize = 2 * NCTX + 12 + NRUN;
 const TBITS: u32 = 20; // default per-model context-table size (2^TBITS slots)
 const MIXCTX: usize = 16384;
 const NL1: usize = 22; // trimmed 27->22 (WORK reduction, within record headroom)
@@ -292,6 +305,17 @@ pub struct Cm {
     dmc4: Dmc,
     dmc5: Dmc,
     ctw: Ctw,
+    // RunContextMap bank (one per RUN_CTX context). Each table slot packs
+    // (chk:8 | count:8 | byte:8); a small StateMap per map turns (run-length,
+    // expected-bit) into a probability the mixer can weight.
+    runtab: Vec<Vec<u32>>,
+    runbits: u32,
+    runmask: u32,
+    run_sm: [[u16; 128]; NRUN],
+    run_pbyte: [i32; NRUN], // byte predicted by this run map for the current byte (-1 = none)
+    run_cnt: [i32; NRUN],   // its run length (consecutive repeats observed)
+    run_used: [bool; NRUN], // run map contributed a prediction this bit (gate its update)
+    run_idx: [usize; NRUN], // run_sm cell read this bit, reused by update
     c0: i32,
     bitcount: i32,
     c4: u32,
@@ -551,6 +575,20 @@ impl Cm {
             dmc4: Dmc::new(5, 5),
             dmc5: Dmc::new(8, 8),
             ctw: Ctw::new(),
+            // Run maps are size-gated like the context tables: 2^22 for the corpus,
+            // 2^18 for the small/adversarial round-trip inputs (keeps the parallel
+            // verifier from OOMing). Both sides of a round-trip pass the same length,
+            // so the size — and thus every index/checksum — is identical on en/decode.
+            runtab: (0..NRUN)
+                .map(|_| vec![0u32; 1usize << if big { 22 } else { 18 }])
+                .collect(),
+            runbits: if big { 22 } else { 18 },
+            runmask: (1u32 << if big { 22 } else { 18 }) - 1,
+            run_sm: [[32768u16; 128]; NRUN],
+            run_pbyte: [-1; NRUN],
+            run_cnt: [0; NRUN],
+            run_used: [false; NRUN],
+            run_idx: [0; NRUN],
             c0: 1,
             bitcount: 0,
             c4: 0,
@@ -1568,6 +1606,40 @@ impl Cm {
         self.mix_in[DMC4_IN] = self.dmc4.predict(&self.stretch);
         self.mix_in[DMC5_IN] = self.dmc5.predict(&self.stretch);
         self.mix_in[CTW_IN] = self.ctw.predict(&self.stretch);
+        // RunContextMap bank. At the first bit of a byte, read each run map's slot
+        // (its context hash is fixed for the whole byte); for every bit, if the
+        // partial byte still matches the remembered byte, emit that byte's next bit
+        // at a confidence the per-map StateMap has learned for this run length.
+        if self.bitcount == 0 {
+            for j in 0..NRUN {
+                let h = self.ctxhash[RUN_CTX[j]];
+                let slot = self.runtab[j][(h & self.runmask) as usize];
+                if (slot >> 16) as u8 == (h >> self.runbits) as u8 && ((slot >> 8) & 0xff) != 0 {
+                    self.run_pbyte[j] = (slot & 0xff) as i32;
+                    self.run_cnt[j] = ((slot >> 8) & 0xff) as i32;
+                } else {
+                    self.run_pbyte[j] = -1;
+                    self.run_cnt[j] = 0;
+                }
+            }
+        }
+        for j in 0..NRUN {
+            self.run_used[j] = false;
+            self.mix_in[RUN_BASE + j] = 0;
+            let pb = self.run_pbyte[j];
+            if pb >= 0 {
+                let sofar = self.c0 - (1 << self.bitcount);
+                if sofar == (pb >> (8 - self.bitcount)) {
+                    let expected_bit = (pb >> (7 - self.bitcount)) & 1;
+                    let cnt = self.run_cnt[j].min(63);
+                    let sidx = ((cnt << 1) | expected_bit) as usize;
+                    self.run_idx[j] = sidx;
+                    self.mix_in[RUN_BASE + j] =
+                        unsafe { *self.stretch16.get_unchecked(self.run_sm[j][sidx] as usize) };
+                    self.run_used[j] = true;
+                }
+            }
+        }
         // Pre-widen the full input vector to i64 once; all 27 layer-1 mixers dot
         // the same vector, so this lifts the per-element sign-extend out of the
         // hot loop (run 27x per bit) into a single pass.
@@ -2021,6 +2093,15 @@ impl Cm {
             let v = self.mm_sm6[self.mm_idx6] as i32;
             self.mm_sm6[self.mm_idx6] =
                 (v + (((if bit != 0 { 65535 } else { 0 }) - v) >> 5)) as u16;
+        }
+        // Run-map StateMaps: adapt the (run-length, expected-bit) cell each run map
+        // read this bit toward the observed bit, learning how reliable each run is.
+        let runt = if bit != 0 { 65535 } else { 0 };
+        for j in 0..NRUN {
+            if self.run_used[j] {
+                let v = self.run_sm[j][self.run_idx[j]] as i32;
+                self.run_sm[j][self.run_idx[j]] = (v + ((runt - v) >> 6)) as u16;
+            }
         }
         // Fused layer-1 weight update (mirror of the fused dot in `predict`): all
         // 27 specialists train on the same input vector, so load each mix_in[i]
@@ -2546,6 +2627,26 @@ impl Cm {
             } else {
                 -1
             };
+            // Update each run map: ctxhash[] still holds the context that PRECEDED
+            // this byte (byte_start recomputes them just below), so record that
+            // `byte` followed it — extending the run if the byte repeats, else
+            // resetting to a fresh length-1 run for the new byte.
+            for j in 0..NRUN {
+                let h = self.ctxhash[RUN_CTX[j]];
+                let idx = (h & self.runmask) as usize;
+                let chk = (h >> self.runbits) as u8;
+                let slot = self.runtab[j][idx];
+                let newslot = if (slot >> 16) as u8 == chk
+                    && (slot & 0xff) as u8 == byte
+                    && ((slot >> 8) & 0xff) != 0
+                {
+                    let nc = ((slot >> 8) & 0xff).min(254) + 1;
+                    ((chk as u32) << 16) | (nc << 8) | byte as u32
+                } else {
+                    ((chk as u32) << 16) | (1u32 << 8) | byte as u32
+                };
+                self.runtab[j][idx] = newslot;
+            }
             self.c0 = 1;
             self.bitcount = 0;
             self.byte_start();
