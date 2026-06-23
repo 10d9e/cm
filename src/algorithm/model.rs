@@ -43,6 +43,9 @@ const RUN_BASE: usize = 2 * NCTX + 12; // first run-map mixer input
 // while still learning quickly on freshly-hit (run-length,bit) cells.
 const RUN_SM_K: i32 = 1;
 const RUN_SM_CAP: i32 = 255;
+// Match-model StateMaps: same count-based 1/(cnt+K) adaptation as the run maps.
+const MM_SM_K: i32 = 2;
+const MM_SM_CAP: i32 = 255;
 const NINPUT: usize = 2 * NCTX + 12 + NRUN;
 const TBITS: u32 = 20; // default per-model context-table size (2^TBITS slots)
 const MIXCTX: usize = 16384;
@@ -264,42 +267,42 @@ pub struct Cm {
     matchptr: u32,
     matchlen: i32,
     predicted_byte: i32,
-    mm_sm: [u16; 80],
+    mm_sm: [u32; 80],
     mm_used: bool,
     mm_idx: usize,
     mmtab2: Vec<u32>,
     matchptr2: u32,
     matchlen2: i32,
     predicted_byte2: i32,
-    mm_sm2: [u16; 80],
+    mm_sm2: [u32; 80],
     mm_used2: bool,
     mm_idx2: usize,
     mmtab3: Vec<u32>,
     matchptr3: u32,
     matchlen3: i32,
     predicted_byte3: i32,
-    mm_sm3: [u16; 184],
+    mm_sm3: [u32; 184],
     mm_used3: bool,
     mm_idx3: usize,
     mmtab4: Vec<u32>,
     matchptr4: u32,
     matchlen4: i32,
     predicted_byte4: i32,
-    mm_sm4: [u16; 160],
+    mm_sm4: [u32; 160],
     mm_used4: bool,
     mm_idx4: usize,
     mmtab5: Vec<u32>,
     matchptr5: u32,
     matchlen5: i32,
     predicted_byte5: i32,
-    mm_sm5: [u16; 160],
+    mm_sm5: [u32; 160],
     mm_used5: bool,
     mm_idx5: usize,
     mmtab6: Vec<u32>,
     matchptr6: u32,
     matchlen6: i32,
     predicted_byte6: i32,
-    mm_sm6: [u16; 80],
+    mm_sm6: [u32; 80],
     mm_used6: bool,
     mm_idx6: usize,
     apm1: Apm,
@@ -527,42 +530,42 @@ impl Cm {
             matchptr: 0,
             matchlen: 0,
             predicted_byte: -1,
-            mm_sm: [32768; 80],
+            mm_sm: [1u32 << 31; 80],
             mm_used: false,
             mm_idx: 0,
             mmtab2: vec![0u32; MMSIZE2],
             matchptr2: 0,
             matchlen2: 0,
             predicted_byte2: -1,
-            mm_sm2: [32768; 80],
+            mm_sm2: [1u32 << 31; 80],
             mm_used2: false,
             mm_idx2: 0,
             mmtab3: vec![0u32; MMSIZE3],
             matchptr3: 0,
             matchlen3: 0,
             predicted_byte3: -1,
-            mm_sm3: [32768; 184],
+            mm_sm3: [1u32 << 31; 184],
             mm_used3: false,
             mm_idx3: 0,
             mmtab4: vec![0u32; MMSIZE4],
             matchptr4: 0,
             matchlen4: 0,
             predicted_byte4: -1,
-            mm_sm4: [32768; 160],
+            mm_sm4: [1u32 << 31; 160],
             mm_used4: false,
             mm_idx4: 0,
             mmtab5: vec![0u32; MMSIZE5],
             matchptr5: 0,
             matchlen5: 0,
             predicted_byte5: -1,
-            mm_sm5: [32768; 160],
+            mm_sm5: [1u32 << 31; 160],
             mm_used5: false,
             mm_idx5: 0,
             mmtab6: vec![0u32; MMSIZE6],
             matchptr6: 0,
             matchlen6: 0,
             predicted_byte6: -1,
-            mm_sm6: [32768; 80],
+            mm_sm6: [1u32 << 31; 80],
             mm_used6: false,
             mm_idx6: 0,
             apm1,
@@ -1489,7 +1492,7 @@ impl Cm {
                 self.mix_in[MM_BASE] = unsafe {
                     *self
                         .stretch16
-                        .get_unchecked(*self.mm_sm.get_unchecked(self.mm_idx) as usize)
+                        .get_unchecked((*self.mm_sm.get_unchecked(self.mm_idx) >> 16) as usize)
                 };
                 self.mm_used = true;
             } else {
@@ -1511,7 +1514,7 @@ impl Cm {
                 self.mix_in[MM_BASE + 1] = unsafe {
                     *self
                         .stretch16
-                        .get_unchecked(*self.mm_sm2.get_unchecked(self.mm_idx2) as usize)
+                        .get_unchecked((*self.mm_sm2.get_unchecked(self.mm_idx2) >> 16) as usize)
                 };
                 self.mm_used2 = true;
             } else {
@@ -1533,7 +1536,7 @@ impl Cm {
                 self.mix_in[MM_BASE + 2] = unsafe {
                     *self
                         .stretch16
-                        .get_unchecked(*self.mm_sm3.get_unchecked(self.mm_idx3) as usize)
+                        .get_unchecked((*self.mm_sm3.get_unchecked(self.mm_idx3) >> 16) as usize)
                 };
                 self.mm_used3 = true;
             } else {
@@ -1555,7 +1558,7 @@ impl Cm {
                 self.mix_in[MM_BASE + 3] = unsafe {
                     *self
                         .stretch16
-                        .get_unchecked(*self.mm_sm4.get_unchecked(self.mm_idx4) as usize)
+                        .get_unchecked((*self.mm_sm4.get_unchecked(self.mm_idx4) >> 16) as usize)
                 };
                 self.mm_used4 = true;
             } else {
@@ -1577,7 +1580,7 @@ impl Cm {
                 self.mix_in[MM_BASE + 4] = unsafe {
                     *self
                         .stretch16
-                        .get_unchecked(*self.mm_sm5.get_unchecked(self.mm_idx5) as usize)
+                        .get_unchecked((*self.mm_sm5.get_unchecked(self.mm_idx5) >> 16) as usize)
                 };
                 self.mm_used5 = true;
             } else {
@@ -1599,7 +1602,7 @@ impl Cm {
                 self.mix_in[MM_BASE + 5] = unsafe {
                     *self
                         .stretch16
-                        .get_unchecked(*self.mm_sm6.get_unchecked(self.mm_idx6) as usize)
+                        .get_unchecked((*self.mm_sm6.get_unchecked(self.mm_idx6) >> 16) as usize)
                 };
                 self.mm_used6 = true;
             } else {
@@ -2088,34 +2091,35 @@ impl Cm {
         self.dmc4.update(bit);
         self.dmc5.update(bit);
         self.ctw.update(bit);
+        // Match-model StateMaps, count-based 1/(cnt+K) adaptation (cells pack
+        // prob22<<10 | count, like the run maps and the main context StateMap).
+        macro_rules! mm_sm_update {
+            ($arr:ident, $idx:ident) => {{
+                let entry = self.$arr[self.$idx];
+                let cnt = (entry & 1023) as i32;
+                let p22 = (entry >> 10) as i32;
+                let newp = p22 + (((bit << 22) - p22) / (cnt + MM_SM_K));
+                let newcnt = if cnt < MM_SM_CAP { cnt + 1 } else { MM_SM_CAP };
+                self.$arr[self.$idx] = ((newp as u32) << 10) | (newcnt as u32);
+            }};
+        }
         if self.mm_used {
-            let v = self.mm_sm[self.mm_idx] as i32;
-            self.mm_sm[self.mm_idx] = (v + (((if bit != 0 { 65535 } else { 0 }) - v) >> 6)) as u16;
+            mm_sm_update!(mm_sm, mm_idx);
         }
         if self.mm_used2 {
-            let v = self.mm_sm2[self.mm_idx2] as i32;
-            self.mm_sm2[self.mm_idx2] =
-                (v + (((if bit != 0 { 65535 } else { 0 }) - v) >> 6)) as u16;
+            mm_sm_update!(mm_sm2, mm_idx2);
         }
         if self.mm_used3 {
-            let v = self.mm_sm3[self.mm_idx3] as i32;
-            self.mm_sm3[self.mm_idx3] =
-                (v + (((if bit != 0 { 65535 } else { 0 }) - v) >> 5)) as u16;
+            mm_sm_update!(mm_sm3, mm_idx3);
         }
         if self.mm_used4 {
-            let v = self.mm_sm4[self.mm_idx4] as i32;
-            self.mm_sm4[self.mm_idx4] =
-                (v + (((if bit != 0 { 65535 } else { 0 }) - v) >> 1)) as u16;
+            mm_sm_update!(mm_sm4, mm_idx4);
         }
         if self.mm_used5 {
-            let v = self.mm_sm5[self.mm_idx5] as i32;
-            self.mm_sm5[self.mm_idx5] =
-                (v + (((if bit != 0 { 65535 } else { 0 }) - v) >> 5)) as u16;
+            mm_sm_update!(mm_sm5, mm_idx5);
         }
         if self.mm_used6 {
-            let v = self.mm_sm6[self.mm_idx6] as i32;
-            self.mm_sm6[self.mm_idx6] =
-                (v + (((if bit != 0 { 65535 } else { 0 }) - v) >> 5)) as u16;
+            mm_sm_update!(mm_sm6, mm_idx6);
         }
         // Run-map StateMaps: adapt the (run-length, expected-bit) cell each run map
         // read this bit toward the observed bit, learning how reliable each run is.
