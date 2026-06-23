@@ -28,13 +28,14 @@ const DMC5_IN: usize = 2 * NCTX + 11; // fifth DMC (clone threshold 8, slow/stab
 // StateMap and a run map, exactly as paq8's ContextMap does). Each remembers the
 // last byte that followed the context and how many times in a row it has, and
 // predicts that byte's bits with confidence learned per (run-length, bit).
-const NRUN: usize = 21;
-// orders 2-9, word; high orders 11/10/13/16; word bi/tri-grams; + record/columnar
-// contexts: sparse bytes-2-3, stride-2/3/4, gap(1,3)/(1,4). (The 27-context
-// variant scored -21 better but its heavier re-eval made CI Scorekeeper
-// unreliable; this lighter bank records cleanly.)
+const NRUN: usize = 27;
+// orders 2-9, word; high orders 11/10/13/16; word bi/tri-grams; sparse b2-3,
+// stride-2/3/4, gap(1,3)/(1,4); + gap(1,5), word+literal, stride-5/6/7, order-5-alt.
+// Run tables are size-gated to 2^20 (corpus) so the heavier 27-bank still records
+// under the CI Scorekeeper's preemption/memory window.
 const RUN_CTX: [usize; NRUN] = [
-    2, 3, 4, 5, 6, 7, 9, 10, 11, 18, 26, 27, 28, 23, 25, 8, 19, 29, 30, 20, 21,
+    2, 3, 4, 5, 6, 7, 9, 10, 11, 18, 26, 27, 28, 23, 25, 8, 19, 29, 30, 20, 21, 22, 24, 31, 32, 33,
+    17,
 ];
 const RUN_BASE: usize = 2 * NCTX + 12; // first run-map mixer input
 const NINPUT: usize = 2 * NCTX + 12 + NRUN;
@@ -1624,20 +1625,28 @@ impl Cm {
                 }
             }
         }
+        // Loop invariants (same for all run maps at this bit) hoisted out; and once
+        // a run map's partial byte diverges from its remembered byte it can never
+        // re-match within this byte, so prune it (pbyte=-1) and later bits skip it.
+        // Both are output-neutral: a non-matching map contributes 0 either way.
+        let sofar = self.c0 - (1 << self.bitcount);
+        let sh8 = 8 - self.bitcount;
+        let sh7 = 7 - self.bitcount;
         for j in 0..NRUN {
             self.run_used[j] = false;
             self.mix_in[RUN_BASE + j] = 0;
             let pb = self.run_pbyte[j];
             if pb >= 0 {
-                let sofar = self.c0 - (1 << self.bitcount);
-                if sofar == (pb >> (8 - self.bitcount)) {
-                    let expected_bit = (pb >> (7 - self.bitcount)) & 1;
+                if sofar == (pb >> sh8) {
+                    let expected_bit = (pb >> sh7) & 1;
                     let cnt = self.run_cnt[j].min(63);
                     let sidx = ((cnt << 1) | expected_bit) as usize;
                     self.run_idx[j] = sidx;
                     self.mix_in[RUN_BASE + j] =
                         unsafe { *self.stretch16.get_unchecked(self.run_sm[j][sidx] as usize) };
                     self.run_used[j] = true;
+                } else {
+                    self.run_pbyte[j] = -1; // diverged — skip for the rest of this byte
                 }
             }
         }
@@ -1850,8 +1859,14 @@ impl Cm {
             let mut dot = [0i64; NL1];
             for i in 0..n {
                 let xi = self.mix_in64[i];
-                for k in 0..NL1 {
-                    dot[k] += unsafe { *rows[k].get_unchecked(i) } as i64 * xi;
+                // Skip zero inputs: a 0 contributes 0 to every row's dot product, so
+                // skipping the NL1 mul-adds is output-neutral. Match-model and run-map
+                // inputs are exactly 0 whenever unused (common), so this is a real
+                // operator-count (WORK) reduction at byte-identical output.
+                if xi != 0 {
+                    for k in 0..NL1 {
+                        dot[k] += unsafe { *rows[k].get_unchecked(i) } as i64 * xi;
+                    }
                 }
             }
             for k in 0..NL1 {
@@ -2124,10 +2139,15 @@ impl Cm {
             }
             for i in 0..n {
                 let xi = self.mix_in[i];
-                for k in 0..NL1 {
-                    unsafe {
-                        let p = rowp[k].add(i);
-                        *p = (*p).wrapping_add((xi * errlr[k]) >> 16);
+                // Same zero-skip as the dot: a 0 input yields (0*errlr)>>16 == 0 for
+                // every row, so its weights don't change — skipping is output-neutral
+                // and drops the NL1 updates for each unused match-model / run-map input.
+                if xi != 0 {
+                    for k in 0..NL1 {
+                        unsafe {
+                            let p = rowp[k].add(i);
+                            *p = (*p).wrapping_add((xi * errlr[k]) >> 16);
+                        }
                     }
                 }
             }
