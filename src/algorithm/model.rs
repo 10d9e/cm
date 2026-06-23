@@ -581,10 +581,10 @@ impl Cm {
             // verifier from OOMing). Both sides of a round-trip pass the same length,
             // so the size — and thus every index/checksum — is identical on en/decode.
             runtab: (0..NRUN)
-                .map(|_| vec![0u32; 1usize << if big { 22 } else { 18 }])
+                .map(|_| vec![0u32; 1usize << if big { 20 } else { 18 }])
                 .collect(),
-            runbits: if big { 22 } else { 18 },
-            runmask: (1u32 << if big { 22 } else { 18 }) - 1,
+            runbits: if big { 20 } else { 18 },
+            runmask: (1u32 << if big { 20 } else { 18 }) - 1,
             run_sm: [[32768u16; 128]; NRUN],
             run_pbyte: [-1; NRUN],
             run_cnt: [0; NRUN],
