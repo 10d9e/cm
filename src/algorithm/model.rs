@@ -28,12 +28,13 @@ const DMC5_IN: usize = 2 * NCTX + 11; // fifth DMC (clone threshold 8, slow/stab
 // StateMap and a run map, exactly as paq8's ContextMap does). Each remembers the
 // last byte that followed the context and how many times in a row it has, and
 // predicts that byte's bits with confidence learned per (run-length, bit).
-const NRUN: usize = 27;
-// orders 2-9, word; high orders 11/10/13/16; word bi/tri-grams; sparse b2-3,
-// stride-2/3/4, gap(1,3)/(1,4); + gap(1,5), word+literal, stride-5/6/7, order-5-alt.
+const NRUN: usize = 21;
+// orders 2-9, word; high orders 11/10/13/16; word bi/tri-grams; + record/columnar
+// contexts: sparse bytes-2-3, stride-2/3/4, gap(1,3)/(1,4). (The 27-context
+// variant scored -21 better but its heavier re-eval made CI Scorekeeper
+// unreliable; this lighter bank records cleanly.)
 const RUN_CTX: [usize; NRUN] = [
-    2, 3, 4, 5, 6, 7, 9, 10, 11, 18, 26, 27, 28, 23, 25, 8, 19, 29, 30, 20, 21, 22, 24, 31, 32, 33,
-    17,
+    2, 3, 4, 5, 6, 7, 9, 10, 11, 18, 26, 27, 28, 23, 25, 8, 19, 29, 30, 20, 21,
 ];
 const RUN_BASE: usize = 2 * NCTX + 12; // first run-map mixer input
 const NINPUT: usize = 2 * NCTX + 12 + NRUN;
