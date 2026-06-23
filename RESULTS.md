@@ -102,7 +102,8 @@ Leaderboard of recorded submissions. Full narratives live in
 | 0095 | 2026-06-23 | @abipalli | 571544 | 0 bytes, -24755055 WORK (new record) | +17.37% | `140a07b` | [0095](history/entries/0095--abipalli.md) | perf: CTW transcendental skips (output-neutral) — WORK 5.795G -> 5.771G (-24.8… |
 | 0096 | 2026-06-23 | @abipalli | 571495 | -49 (new record) | +17.38% | `0f56d86` | [0096](history/entries/0096--abipalli.md) | perf: count-based run-map StateMap adaptation — SCORE 571544 -> 571495 (-49) T… |
 | 0097 | 2026-06-23 | @abipalli | 571415 | -80 (new record) | +17.39% | `09ff0f3` | [0097](history/entries/0097--abipalli.md) | perf: count-based match-model StateMaps — SCORE 571495 -> 571415 (-80) Applies… |
+| 0098 | 2026-06-23 | @abipalli | 571378 | -37 (new record) | +17.39% | `927bba9` | [0098](history/entries/0098--abipalli.md) | feat: GLN-style halfspace-gated mixer specialist — SCORE 571415 -> 571378 (-37… |
 
-**Current record: 571415** (@abipalli, entry 0097)
+**Current record: 571378** (@abipalli, entry 0098)
 
 Ledger updates are **CI-only** — see [`.github/workflows/scorekeeper.yml`](.github/workflows/scorekeeper.yml).
