@@ -80,7 +80,16 @@ impl Node {
 fn ln_add(a: f64, b: f64) -> f64 {
     // log(e^a + e^b), numerically stable.
     let (hi, lo) = if a > b { (a, b) } else { (b, a) };
-    hi + (lo - hi).exp().ln_1p()
+    // When the gap is large the small term, ln_1p(e^{lo-hi}), is below half the ULP
+    // of `hi` and the addition rounds back to `hi` exactly — so skip the exp/ln_1p.
+    // Callers here always have hi <= ln(1-W_EST) = -0.386 (every lw/lpe is a log
+    // probability <= 0), so |hi| >= 0.386 and ULP(hi) >= 2^-54; e^{-40} ~ 4.2e-18 is
+    // well under ULP/2 ~ 2.8e-17, making this byte-identical to the full call.
+    let d = lo - hi;
+    if d < -40.0 {
+        return hi;
+    }
+    hi + d.exp().ln_1p()
 }
 
 pub struct Ctw {
@@ -157,6 +166,13 @@ impl Ctw {
         // exactly 0 (an empty node with empty children, e.g. the deep unseen tail)
         // e^0 == 1, so alpha is exactly 0.5 — skip the expensive transcendental.
         let arg = lpc - nd.lpe;
+        // When arg is very negative, WRATIO*e^arg < 2^-53, so 1 + that rounds to 1.0
+        // and alpha is exactly 1.0 -> the result is exactly the node's KT estimate.
+        // (WRATIO=2.125, so arg<=-38 gives 2.125*e^-38 ~ 6.7e-17 < 2^-53 ~ 1.1e-16.)
+        // Skipping the exp here is byte-identical to the full formula.
+        if arg <= -38.0 {
+            return nd.kt_p1();
+        }
         let alpha = if arg == 0.0 { ALPHA0 } else { 1.0 / (1.0 + WRATIO * arg.exp()) };
         alpha * nd.kt_p1() + (1.0 - alpha) * pred
     }
