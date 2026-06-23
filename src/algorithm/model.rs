@@ -49,7 +49,10 @@ const MM_SM_CAP: i32 = 255;
 const NINPUT: usize = 2 * NCTX + 12 + NRUN;
 const TBITS: u32 = 20; // default per-model context-table size (2^TBITS slots)
 const MIXCTX: usize = 16384;
-const NL1: usize = 22; // trimmed 27->22 (WORK reduction, within record headroom)
+const NL1: usize = 23; // 22 curated specialists + 1 GLN (halfspace-gated) specialist
+// GLN-style specialist: gated by the sign-agreement pattern of GLN_BITS base model
+// predictions (a data-dependent gate, unlike the byte-context gates of the others).
+const GLN_BITS: u32 = 14;
 const L1LR: i32 = 8; // layer-1 specialist learning rate
 const L2LR: i32 = 10; // layer-2 combiner learning rate
 const MIX3CTX: usize = 8192; // order-2 specialist rows
@@ -468,6 +471,7 @@ impl Cm {
             Mixer::new(NINPUT, 16, q), // periodic / record selector
             Mixer::new(NINPUT, 64, q), // above-char-class + nest selector
             Mixer::new(NINPUT, 32, q), // gradient-magnitude selector
+            Mixer::new(NINPUT, 1 << GLN_BITS, q), // GLN: gate on order-0..6 counter+SM signs
         ];
         let l2 = Mixer::new(NL1, 256, L2LR);
         let l2b = Mixer::new(NL1, 256, L2LR);
@@ -1835,6 +1839,16 @@ impl Cm {
         };
         let gmagsel = dmag | (cls(self.c4) << 3);
         self.l1[21].ctx = (gmagsel) & (self.l1[21].nctx - 1);
+        // GLN-style halfspace gate: the sign-agreement pattern of GLN_BITS base
+        // predictions (order-0..6 direct counters + their bit-history StateMaps).
+        // Unlike the byte-context gates above, this partitions the input space by
+        // *which models lean toward 1* — the GLN's data-dependent gating.
+        let mut glngate = 0usize;
+        for k in 0..(GLN_BITS as usize / 2) {
+            glngate |= ((self.mix_in[k] > 0) as usize) << k;
+            glngate |= ((self.mix_in[SM_BASE + k] > 0) as usize) << (GLN_BITS as usize / 2 + k);
+        }
+        self.l1[22].ctx = glngate & (self.l1[22].nctx - 1);
         // delta sign+magnitude selector: the last byte difference bucketed by
         // both sign and coarse magnitude (numeric trend, finer than sign alone).
         let dsm = {
