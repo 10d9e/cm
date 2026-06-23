@@ -38,6 +38,11 @@ const RUN_CTX: [usize; NRUN] = [
     17,
 ];
 const RUN_BASE: usize = 2 * NCTX + 12; // first run-map mixer input
+// Run-map StateMap: count-based adaptation (fast early, asymptotes to ~1/(CAP+K)).
+// A fixed-shift sweep found slow (>>8) best, so CAP keeps the asymptotic rate slow
+// while still learning quickly on freshly-hit (run-length,bit) cells.
+const RUN_SM_K: i32 = 1;
+const RUN_SM_CAP: i32 = 255;
 const NINPUT: usize = 2 * NCTX + 12 + NRUN;
 const TBITS: u32 = 20; // default per-model context-table size (2^TBITS slots)
 const MIXCTX: usize = 16384;
@@ -313,7 +318,7 @@ pub struct Cm {
     runtab: Vec<Vec<u32>>,
     runbits: u32,
     runmask: u32,
-    run_sm: [[u16; 128]; NRUN],
+    run_sm: [[u32; 128]; NRUN], // count-based StateMap cells: (prob22 << 10) | count
     run_pbyte: [i32; NRUN], // byte predicted by this run map for the current byte (-1 = none)
     run_cnt: [i32; NRUN],   // its run length (consecutive repeats observed)
     run_used: [bool; NRUN], // run map contributed a prediction this bit (gate its update)
@@ -586,7 +591,7 @@ impl Cm {
                 .collect(),
             runbits: if big { 20 } else { 18 },
             runmask: (1u32 << if big { 20 } else { 18 }) - 1,
-            run_sm: [[32768u16; 128]; NRUN],
+            run_sm: [[1u32 << 31; 128]; NRUN], // prob22 = 0.5, count = 0
             run_pbyte: [-1; NRUN],
             run_cnt: [0; NRUN],
             run_used: [false; NRUN],
@@ -1642,8 +1647,10 @@ impl Cm {
                     let cnt = self.run_cnt[j].min(63);
                     let sidx = ((cnt << 1) | expected_bit) as usize;
                     self.run_idx[j] = sidx;
+                    // prob is the top 16 bits of the 22-bit fixed point (>>10 then >>6).
+                    let smp = (self.run_sm[j][sidx] >> 16) as usize;
                     self.mix_in[RUN_BASE + j] =
-                        unsafe { *self.stretch16.get_unchecked(self.run_sm[j][sidx] as usize) };
+                        unsafe { *self.stretch16.get_unchecked(smp) };
                     self.run_used[j] = true;
                 } else {
                     self.run_pbyte[j] = -1; // diverged — skip for the rest of this byte
@@ -2112,11 +2119,14 @@ impl Cm {
         }
         // Run-map StateMaps: adapt the (run-length, expected-bit) cell each run map
         // read this bit toward the observed bit, learning how reliable each run is.
-        let runt = if bit != 0 { 65535 } else { 0 };
         for j in 0..NRUN {
             if self.run_used[j] {
-                let v = self.run_sm[j][self.run_idx[j]] as i32;
-                self.run_sm[j][self.run_idx[j]] = (v + ((runt - v) >> 6)) as u16;
+                let entry = self.run_sm[j][self.run_idx[j]];
+                let cnt = (entry & 1023) as i32;
+                let p22 = (entry >> 10) as i32;
+                let newp = p22 + (((bit << 22) - p22) / (cnt + RUN_SM_K));
+                let newcnt = if cnt < RUN_SM_CAP { cnt + 1 } else { RUN_SM_CAP };
+                self.run_sm[j][self.run_idx[j]] = ((newp as u32) << 10) | (newcnt as u32);
             }
         }
         // Fused layer-1 weight update (mirror of the fused dot in `predict`): all
