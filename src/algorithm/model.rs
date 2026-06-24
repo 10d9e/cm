@@ -49,10 +49,19 @@ const MM_SM_CAP: i32 = 255;
 const NINPUT: usize = 2 * NCTX + 12 + NRUN;
 const TBITS: u32 = 20; // default per-model context-table size (2^TBITS slots)
 const MIXCTX: usize = 16384;
-const NL1: usize = 23; // 22 curated specialists + 1 GLN (halfspace-gated) specialist
-// GLN-style specialist: gated by the sign-agreement pattern of GLN_BITS base model
-// predictions (a data-dependent gate, unlike the byte-context gates of the others).
+const NGLN_HS: usize = 1; // true-halfspace GLN specialists (independent hyperplane sets)
+const NL1: usize = 22 + NGLN_HS + 1; // 22 curated + NGLN_HS halfspace + 1 axis-aligned GLN
+// GLN-style specialist: gated by GLN_BITS *true* halfspaces over GLN_SEL base
+// predictions. Each gate bit is sign(<fixed pseudo-random ±1 hyperplane, preds>),
+// i.e. a weighted-agreement direction (the Veness GLN gate), not a single sign.
 const GLN_BITS: u32 = 14;
+const GLN_NSEL: usize = 22; // base predictions fed to the gate
+const GLN_SEL: [usize; GLN_NSEL] = [
+    0, 1, 2, 3, 4, 5, 6, // order-0..6 direct counters
+    SM_BASE, SM_BASE + 1, SM_BASE + 2, SM_BASE + 3, SM_BASE + 4, SM_BASE + 5, SM_BASE + 6, // StateMaps
+    MM_BASE, MM_BASE + 1, MM_BASE + 2, MM_BASE + 3, MM_BASE + 4, MM_BASE + 5, // 6 match models
+    DMC_IN, CTW_IN,
+];
 const L1LR: i32 = 8; // layer-1 specialist learning rate
 const L2LR: i32 = 10; // layer-2 combiner learning rate
 const MIX3CTX: usize = 8192; // order-2 specialist rows
@@ -232,6 +241,7 @@ impl Mixer {
 }
 
 pub struct Cm {
+    gln_hp: [[[i8; GLN_NSEL]; GLN_BITS as usize]; NGLN_HS], // fixed ±1 halfspace gating weights
     stretch: Vec<i32>,
     squash: Vec<i32>,
     stretch16: Vec<i32>,
@@ -471,7 +481,8 @@ impl Cm {
             Mixer::new(NINPUT, 16, q), // periodic / record selector
             Mixer::new(NINPUT, 64, q), // above-char-class + nest selector
             Mixer::new(NINPUT, 32, q), // gradient-magnitude selector
-            Mixer::new(NINPUT, 1 << GLN_BITS, q), // GLN: gate on order-0..6 counter+SM signs
+            Mixer::new(NINPUT, 1 << GLN_BITS, q), // GLN halfspace specialist
+            Mixer::new(NINPUT, 1 << GLN_BITS, q), // GLN: axis-aligned (per-prediction sign) gate
         ];
         let l2 = Mixer::new(NL1, 256, L2LR);
         let l2b = Mixer::new(NL1, 256, L2LR);
@@ -497,7 +508,20 @@ impl Cm {
         let apm3 = Apm::new(1024, &squash);
         let apm4 = Apm::new(1024, &squash);
 
+        // Fixed pseudo-random ±1 halfspace gating weights (same on encode/decode);
+        // one independent hyperplane set per true-halfspace GLN specialist.
+        let mut gln_hp = [[[0i8; GLN_NSEL]; GLN_BITS as usize]; NGLN_HS];
+        for s in 0..NGLN_HS {
+            for k in 0..GLN_BITS as usize {
+                for i in 0..GLN_NSEL {
+                    let seed = ((s as u32) << 24) ^ (k as u32).wrapping_mul(0x9E37_79B1) ^ 0x5bd1_e995;
+                    let h = hashk(seed, i as u32);
+                    gln_hp[s][k][i] = if (h >> 19) & 1 == 0 { 1 } else { -1 };
+                }
+            }
+        }
         Cm {
+            gln_hp,
             stretch,
             squash,
             stretch16,
@@ -1843,12 +1867,27 @@ impl Cm {
         // predictions (order-0..6 direct counters + their bit-history StateMaps).
         // Unlike the byte-context gates above, this partitions the input space by
         // *which models lean toward 1* — the GLN's data-dependent gating.
-        let mut glngate = 0usize;
-        for k in 0..(GLN_BITS as usize / 2) {
-            glngate |= ((self.mix_in[k] > 0) as usize) << k;
-            glngate |= ((self.mix_in[SM_BASE + k] > 0) as usize) << (GLN_BITS as usize / 2 + k);
+        // True-halfspace GLN specialists: each gate bit = sign(<hyperplane, preds>).
+        for s in 0..NGLN_HS {
+            let mut glngate = 0usize;
+            for k in 0..GLN_BITS as usize {
+                let hp = &self.gln_hp[s][k];
+                let mut proj = 0i64;
+                for i in 0..GLN_NSEL {
+                    proj += hp[i] as i64 * self.mix_in[GLN_SEL[i]] as i64;
+                }
+                glngate |= ((proj > 0) as usize) << k;
+            }
+            self.l1[22 + s].ctx = glngate & (self.l1[22 + s].nctx - 1);
         }
-        self.l1[22].ctx = glngate & (self.l1[22].nctx - 1);
+        // Axis-aligned GLN specialist: sign of each base prediction (complementary
+        // partition to the weighted-halfspace gates above).
+        let mut glngate2 = 0usize;
+        for k in 0..(GLN_BITS as usize / 2) {
+            glngate2 |= ((self.mix_in[k] > 0) as usize) << k;
+            glngate2 |= ((self.mix_in[SM_BASE + k] > 0) as usize) << (GLN_BITS as usize / 2 + k);
+        }
+        self.l1[22 + NGLN_HS].ctx = glngate2 & (self.l1[22 + NGLN_HS].nctx - 1);
         // delta sign+magnitude selector: the last byte difference bucketed by
         // both sign and coarse magnitude (numeric trend, finer than sign alone).
         let dsm = {
