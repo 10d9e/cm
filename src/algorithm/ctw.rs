@@ -60,7 +60,7 @@ const ALPHA0: f64 = 1.0 / (1.0 + WRATIO);
 // prior makes the per-node estimate more confident on skewed bit counts. Note the
 // n0==n1 update fast-path stays exact for any KT_A (p_obs is still 1/2 when the
 // counts are equal), as does the empty-node predict (still 1/2).
-const KT_A: f64 = 0.05;
+const KT_A: f64 = 0.04;
 const KT_2A: f64 = 2.0 * KT_A;
 
 #[derive(Clone, Copy)]

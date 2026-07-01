@@ -19,7 +19,7 @@ const MAXN: usize = 1 << 22; // node cap (~64 MB at 16 B/node); freeze growth wh
 // DMC predictive smoothing prior alpha = DMC_NUM/DMC_DEN (textbook KT = 1/2).
 // A smaller prior makes the count ratio more confident on skewed edges.
 const DMC_NUM: u64 = 1;
-const DMC_DEN: u64 = 6;
+const DMC_DEN: u64 = 7;
 
 struct Node {
     nx: [u32; 2], // next state for an observed 0 / 1
