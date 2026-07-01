@@ -63,7 +63,7 @@ const GLN_SEL: [usize; GLN_NSEL] = [
     DMC_IN, CTW_IN,
 ];
 const L1LR: i32 = 8; // layer-1 specialist learning rate
-const L2LR: i32 = 10; // layer-2 combiner learning rate
+const L2LR: i32 = 8; // layer-2 combiner learning rate
 const MIX3CTX: usize = 8192; // order-2 specialist rows
 const MIX4CTX: usize = 8192; // order-3 specialist rows
 const FBITS: u32 = 23; // indirect order-3/-4/-5/-6 follow-history hash table bits
