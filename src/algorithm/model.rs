@@ -50,7 +50,7 @@ const NINPUT: usize = 2 * NCTX + 12 + NRUN;
 const TBITS: u32 = 20; // default per-model context-table size (2^TBITS slots)
 const MIXCTX: usize = 16384;
 const NGLN_HS: usize = 1; // true-halfspace GLN specialists (independent hyperplane sets)
-const NL1: usize = 22 + NGLN_HS + 6; // + statemap-confidence GLN
+const NL1: usize = 22 + NGLN_HS + 7; // + high-order statemap-confidence GLN
 // GLN-style specialist: gated by GLN_BITS *true* halfspaces over GLN_SEL base
 // predictions. Each gate bit is sign(<fixed pseudo-random ±1 hyperplane, preds>),
 // i.e. a weighted-agreement direction (the Veness GLN gate), not a single sign.
@@ -488,6 +488,7 @@ impl Cm {
             Mixer::new(NINPUT, 256, q), // GLN: local-context (order-N) confidence gate
             Mixer::new(NINPUT, 256, q), // GLN: word-model confidence gate
             Mixer::new(NINPUT, 256, q), // GLN: bit-history StateMap confidence gate
+            Mixer::new(NINPUT, 256, q), // GLN: high-order/structural StateMap confidence gate
         ];
         let l2 = Mixer::new(NL1, 256, L2LR);
         let l2b = Mixer::new(NL1, 256, L2LR);
@@ -1940,6 +1941,14 @@ impl Cm {
             | (cbucket(self.mix_in[SM_BASE + 7]) << 4)
             | (cbucket(self.mix_in[SM_BASE + 11]) << 6);
         self.l1[22 + NGLN_HS + 5].ctx = glngate10 & (self.l1[22 + NGLN_HS + 5].nctx - 1);
+        // Word/mid-order StateMap + long-match confidence gate: sharpness of the
+        // word-context StateMaps (indices 9/12/13) plus the order-8 match model —
+        // a distinct set of contexts from the low-order StateMap gate above.
+        let glngate11 = cbucket(self.mix_in[SM_BASE + 9])
+            | (cbucket(self.mix_in[SM_BASE + 12]) << 2)
+            | (cbucket(self.mix_in[MM_BASE + 2]) << 4)
+            | (cbucket(self.mix_in[SM_BASE + 13]) << 6);
+        self.l1[22 + NGLN_HS + 6].ctx = glngate11 & (self.l1[22 + NGLN_HS + 6].nctx - 1);
         // delta sign+magnitude selector: the last byte difference bucketed by
         // both sign and coarse magnitude (numeric trend, finer than sign alone).
         let dsm = {
