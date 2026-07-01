@@ -46,14 +46,14 @@ impl Hasher for IdHasher {
 }
 type NodeMap = HashMap<u64, Node, BuildHasherDefault<IdHasher>>;
 
-const DEPTH: usize = 48; // context depth in bits (6 bytes)
+const DEPTH: usize = 56; // context depth in bits (7 bytes)
 const MAXNODES: usize = 1 << 24; // node-store cap (~0.8 GB); freeze growth when hit
                                  // so adversarial/random inputs cannot OOM the verifier
 // CTW node-weight prior: weight on a node's own KT estimate vs. its children's
 // weighted product (textbook = 1/2). Below 1/2 trusts the deeper context more.
 // WRATIO/ALPHA0 fold it into predict; lw_est/lw_split (struct fields = ln(W_EST)
 // / ln(1-W_EST)) fold it into update. W_EST=0.5 is exactly the original ½/½ code.
-const W_EST: f64 = 0.15;
+const W_EST: f64 = 0.12;
 const WRATIO: f64 = (1.0 - W_EST) / W_EST;
 const ALPHA0: f64 = 1.0 / (1.0 + WRATIO);
 
