@@ -44,13 +44,13 @@ const RUN_BASE: usize = 2 * NCTX + 12; // first run-map mixer input
 const RUN_SM_K: i32 = 1;
 const RUN_SM_CAP: i32 = 255;
 // Match-model StateMaps: same count-based 1/(cnt+K) adaptation as the run maps.
-const MM_SM_K: i32 = 2;
-const MM_SM_CAP: i32 = 255;
+const MM_SM_K: i32 = 1;
+const MM_SM_CAP: i32 = 511;
 const NINPUT: usize = 2 * NCTX + 12 + NRUN;
 const TBITS: u32 = 20; // default per-model context-table size (2^TBITS slots)
 const MIXCTX: usize = 16384;
 const NGLN_HS: usize = 1; // true-halfspace GLN specialists (independent hyperplane sets)
-const NL1: usize = 22 + NGLN_HS + 1; // 22 curated + NGLN_HS halfspace + 1 axis-aligned GLN
+const NL1: usize = 22 + NGLN_HS + 2; // 22 curated + NGLN_HS halfspace + 1 axis-aligned GLN + 1 high-level-agreement GLN
 // GLN-style specialist: gated by GLN_BITS *true* halfspaces over GLN_SEL base
 // predictions. Each gate bit is sign(<fixed pseudo-random ±1 hyperplane, preds>),
 // i.e. a weighted-agreement direction (the Veness GLN gate), not a single sign.
@@ -483,6 +483,7 @@ impl Cm {
             Mixer::new(NINPUT, 32, q), // gradient-magnitude selector
             Mixer::new(NINPUT, 1 << GLN_BITS, q), // GLN halfspace specialist
             Mixer::new(NINPUT, 1 << GLN_BITS, q), // GLN: axis-aligned (per-prediction sign) gate
+            Mixer::new(NINPUT, 256, q), // GLN: high-level predictor sign-agreement gate
         ];
         let l2 = Mixer::new(NL1, 256, L2LR);
         let l2b = Mixer::new(NL1, 256, L2LR);
@@ -1888,6 +1889,16 @@ impl Cm {
             glngate2 |= ((self.mix_in[SM_BASE + k] > 0) as usize) << (GLN_BITS as usize / 2 + k);
         }
         self.l1[22 + NGLN_HS].ctx = glngate2 & (self.l1[22 + NGLN_HS].nctx - 1);
+        // High-level predictor sign-agreement gate: complementary axis partition
+        // over the 6 match models + DMC + CTW (the long-range/structural predictors
+        // the order-0..6 axis gate above does not cover). 8 signs -> 256 rows.
+        let mut glngate3 = 0usize;
+        for k in 0..6 {
+            glngate3 |= ((self.mix_in[MM_BASE + k] > 0) as usize) << k;
+        }
+        glngate3 |= ((self.mix_in[DMC_IN] > 0) as usize) << 6;
+        glngate3 |= ((self.mix_in[CTW_IN] > 0) as usize) << 7;
+        self.l1[22 + NGLN_HS + 1].ctx = glngate3 & (self.l1[22 + NGLN_HS + 1].nctx - 1);
         // delta sign+magnitude selector: the last byte difference bucketed by
         // both sign and coarse magnitude (numeric trend, finer than sign alone).
         let dsm = {
