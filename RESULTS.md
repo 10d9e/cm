@@ -105,7 +105,8 @@ Leaderboard of recorded submissions. Full narratives live in
 | 0098 | 2026-06-23 | @abipalli | 571378 | -37 (new record) | +17.39% | `927bba9` | [0098](history/entries/0098--abipalli.md) | feat: GLN-style halfspace-gated mixer specialist — SCORE 571415 -> 571378 (-37… |
 | 0099 | 2026-06-24 | @abipalli | 571321 | -57 (new record) | +17.40% | `a7d8fa5` | [0099](history/entries/0099--abipalli.md) | feat: true-halfspace GLN gate + complementary axis-aligned specialist — SCORE … |
 | 0100 | 2026-07-01 | @10d9e | 571145 | -176 (new record) | +17.43% | `c85aa19` | [0100](history/entries/0100--10d9e.md) | Adds a 25th layer-1 specialist that extends the GLN gating idea (entries 0098/00… |
+| 0101 | 2026-07-01 | @10d9e | 571118 | -27 (new record) | +17.43% | `dc3b5a5` | [0101](history/entries/0101--10d9e.md) | Deepens the Context Tree Weighting model from DEPTH=48 (6 bytes) to 56 (7 bytes)… |
 
-**Current record: 571145** (@10d9e, entry 0100)
+**Current record: 571118** (@10d9e, entry 0101)
 
 Ledger updates are **CI-only** — see [`.github/workflows/scorekeeper.yml`](.github/workflows/scorekeeper.yml).
