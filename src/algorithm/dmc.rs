@@ -16,6 +16,10 @@
 //! a down-weightable mixer input, so if it fails to help the mixer ignores it.
 
 const MAXN: usize = 1 << 22; // node cap (~64 MB at 16 B/node); freeze growth when hit
+// DMC predictive smoothing prior alpha = DMC_NUM/DMC_DEN (textbook KT = 1/2).
+// A smaller prior makes the count ratio more confident on skewed edges.
+const DMC_NUM: u64 = 1;
+const DMC_DEN: u64 = 6;
 
 struct Node {
     nx: [u32; 2], // next state for an observed 0 / 1
@@ -61,8 +65,9 @@ impl Dmc {
         let s = self.curr as usize;
         let c0 = self.nodes[s].c[0] as u64;
         let c1 = self.nodes[s].c[1] as u64;
-        // Krichevsky–Trofimov style smoothing: (c1 + 0.5) / (c0 + c1 + 1).
-        let mut p = (((2 * c1 + 1) * 2048) / (c0 + c1 + 1)) as i32;
+        // Krichevsky–Trofimov style smoothing: (c1 + a) / (c0 + c1 + 2a),
+        // a = DMC_NUM/DMC_DEN, scaled to a 12-bit probability.
+        let mut p = (((DMC_DEN * c1 + DMC_NUM) * 4096) / (DMC_DEN * (c0 + c1) + 2 * DMC_NUM)) as i32;
         if p < 1 { p = 1; }
         if p > 4095 { p = 4095; }
         // p is clamped to [1,4095], a valid index into the 4096-entry table.
