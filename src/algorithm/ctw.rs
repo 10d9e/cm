@@ -56,6 +56,12 @@ const MAXNODES: usize = 1 << 24; // node-store cap (~0.8 GB); freeze growth when
 const W_EST: f64 = 0.12;
 const WRATIO: f64 = (1.0 - W_EST) / W_EST;
 const ALPHA0: f64 = 1.0 / (1.0 + WRATIO);
+// KT (Krichevsky–Trofimov) estimator prior. The textbook value is 1/2; a smaller
+// prior makes the per-node estimate more confident on skewed bit counts. Note the
+// n0==n1 update fast-path stays exact for any KT_A (p_obs is still 1/2 when the
+// counts are equal), as does the empty-node predict (still 1/2).
+const KT_A: f64 = 0.05;
+const KT_2A: f64 = 2.0 * KT_A;
 
 #[derive(Clone, Copy)]
 struct Node {
@@ -72,7 +78,7 @@ impl Node {
     /// KT predictive P(next bit = 1) = (n1 + 1/2) / (n0 + n1 + 1).
     #[inline]
     fn kt_p1(&self) -> f64 {
-        (self.n[1] as f64 + 0.5) / (self.n[0] as f64 + self.n[1] as f64 + 1.0)
+        (self.n[1] as f64 + KT_A) / (self.n[0] as f64 + self.n[1] as f64 + KT_2A)
     }
 }
 
@@ -278,8 +284,8 @@ impl Ctw {
             if nd.n[0] == nd.n[1] {
                 nd.lpe += self.ln_half;
             } else {
-                let denom = nd.n[0] as f64 + nd.n[1] as f64 + 1.0;
-                let p_obs = (nd.n[b] as f64 + 0.5) / denom;
+                let denom = nd.n[0] as f64 + nd.n[1] as f64 + KT_2A;
+                let p_obs = (nd.n[b] as f64 + KT_A) / denom;
                 nd.lpe += p_obs.ln();
             }
             nd.n[b] += 1;
