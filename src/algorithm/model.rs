@@ -50,7 +50,7 @@ const NINPUT: usize = 2 * NCTX + 12 + NRUN;
 const TBITS: u32 = 20; // default per-model context-table size (2^TBITS slots)
 const MIXCTX: usize = 16384;
 const NGLN_HS: usize = 1; // true-halfspace GLN specialists (independent hyperplane sets)
-const NL1: usize = 22 + NGLN_HS + 3; // 22 curated + NGLN_HS halfspace + 1 axis GLN + 1 high-level-agreement GLN + 1 high-level-confidence GLN
+const NL1: usize = 22 + NGLN_HS + 4; // 22 curated + NGLN_HS halfspace + axis GLN + high-level-agreement + high-level-confidence + local-context-confidence GLN
 // GLN-style specialist: gated by GLN_BITS *true* halfspaces over GLN_SEL base
 // predictions. Each gate bit is sign(<fixed pseudo-random ±1 hyperplane, preds>),
 // i.e. a weighted-agreement direction (the Veness GLN gate), not a single sign.
@@ -485,6 +485,7 @@ impl Cm {
             Mixer::new(NINPUT, 1 << GLN_BITS, q), // GLN: axis-aligned (per-prediction sign) gate
             Mixer::new(NINPUT, 256, q), // GLN: high-level predictor sign-agreement gate
             Mixer::new(NINPUT, 256, q), // GLN: high-level predictor confidence gate
+            Mixer::new(NINPUT, 256, q), // GLN: local-context (order-N) confidence gate
         ];
         let l2 = Mixer::new(NL1, 256, L2LR);
         let l2b = Mixer::new(NL1, 256, L2LR);
@@ -1911,6 +1912,15 @@ impl Cm {
             | (cbucket(self.mix_in[MM_BASE]) << 4)
             | (cbucket(self.mix_in[MM_BASE + 1]) << 6);
         self.l1[22 + NGLN_HS + 2].ctx = glngate5 & (self.l1[22 + NGLN_HS + 2].nctx - 1);
+        // Local-context confidence gate: the confidence of the mid-order direct
+        // counters (order-2/3/4/6). Complements the high-level confidence gate —
+        // when the local context models are sharp the mixer should weight them
+        // over the structural predictors, and vice-versa.
+        let glngate6 = cbucket(self.mix_in[2])
+            | (cbucket(self.mix_in[3]) << 2)
+            | (cbucket(self.mix_in[4]) << 4)
+            | (cbucket(self.mix_in[6]) << 6);
+        self.l1[22 + NGLN_HS + 3].ctx = glngate6 & (self.l1[22 + NGLN_HS + 3].nctx - 1);
         // delta sign+magnitude selector: the last byte difference bucketed by
         // both sign and coarse magnitude (numeric trend, finer than sign alone).
         let dsm = {
