@@ -50,7 +50,7 @@ const NINPUT: usize = 2 * NCTX + 12 + NRUN;
 const TBITS: u32 = 20; // default per-model context-table size (2^TBITS slots)
 const MIXCTX: usize = 16384;
 const NGLN_HS: usize = 1; // true-halfspace GLN specialists (independent hyperplane sets)
-const NL1: usize = 22 + NGLN_HS + 13; // + difficulty/trend/volatility/per-class + match-consensus specialists
+const NL1: usize = 22 + NGLN_HS + 14; // + difficulty/trend/volatility/per-class/per-nibble + match-consensus specialists
 // GLN-style specialist: gated by GLN_BITS *true* halfspaces over GLN_SEL base
 // predictions. Each gate bit is sign(<fixed pseudo-random ±1 hyperplane, preds>),
 // i.e. a weighted-agreement direction (the Veness GLN gate), not a single sign.
@@ -370,6 +370,7 @@ pub struct Cm {
     hard_slow: i32, // slow surprise EMA (~128-bit window) — trend baseline
     hard_vol: i32,  // EMA of |fast - slow| — difficulty volatility (regime churn)
     hard_cls: [i32; 4], // per-char-class surprise EMAs (other/letter/digit/space)
+    hard_hn: [i32; 16], // per-high-nibble surprise EMAs (opcode-class analog for binary)
     c4: u32,
     wordhash: u32,
     prevword: u32,
@@ -524,6 +525,7 @@ impl Cm {
             Mixer::new(NINPUT, 512, q), // match-consensus specialist (agreeing matches x expected bit x bitpos)
             Mixer::new(NINPUT, 128, q), // difficulty-volatility specialist (regime churn x bitpos)
             Mixer::new(NINPUT, 512, q), // per-class difficulty specialist (class-conditional surprise)
+            Mixer::new(NINPUT, 2048, q), // per-high-nibble difficulty specialist (opcode-conditional surprise)
         ];
         let l2 = Mixer::new(NL1, 256, L2LR);
         let l2b = Mixer::new(NL1, 256, L2LR);
@@ -692,6 +694,7 @@ impl Cm {
             hard_slow: 0,
             hard_vol: 0,
             hard_cls: [0; 4],
+            hard_hn: [0; 16],
             c4: 0,
             wordhash: 0,
             prevword: 0,
@@ -2096,6 +2099,17 @@ impl Cm {
                 | ((self.bitcount as usize) << 6))
                 & (self.l1[22 + NGLN_HS + 12].nctx - 1);
         }
+        // Per-high-nibble difficulty specialist: the surprise EMA conditioned on
+        // the high nibble of the preceding byte — the opcode-class analog of the
+        // char-class conditioning, aimed at binary/x86 (16 nibble regimes each get
+        // their own difficulty estimate). 16 levels x 16 nibbles x 8 bit positions.
+        {
+            let hn = ((self.c4 >> 4) & 0xf) as usize;
+            self.l1[22 + NGLN_HS + 13].ctx = (((self.hard_hn[hn] >> 12).min(15) as usize)
+                | (hn << 4)
+                | ((self.bitcount as usize) << 8))
+                & (self.l1[22 + NGLN_HS + 13].nctx - 1);
+        }
         // delta sign+magnitude selector: the last byte difference bucketed by
         // both sign and coarse magnitude (numeric trend, finer than sign alone).
         let dsm = {
@@ -2464,6 +2478,8 @@ impl Cm {
         self.hard_vol += (gap - self.hard_vol) >> 5;
         let hc = &mut self.hard_cls[byte_class(self.c4)];
         *hc += (surprise - *hc) >> 5;
+        let hh = &mut self.hard_hn[((self.c4 >> 4) & 0xf) as usize];
+        *hh += (surprise - *hh) >> 5;
         self.apm1.update(bit);
         self.apm2.update(bit);
         self.apm3.update(bit);
