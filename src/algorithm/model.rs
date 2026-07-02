@@ -277,6 +277,8 @@ pub struct Cm {
     l2n: Mixer,              // fourteenth layer-2 combiner (local-counter confidence ctx)
     l2o: Mixer,              // fifteenth layer-2 combiner (word-model confidence ctx)
     l2p: Mixer,              // sixteenth layer-2 combiner (word/mid-order StateMap confidence ctx)
+    l2q: Mixer,              // seventeenth layer-2 combiner (match-consensus ctx)
+    consensus: usize,        // match-consensus gate value, stashed for the l2q combiner
     l2_in: [i32; NL1],
     l2_in64: [i64; NL1], // l2_in pre-widened to i64 for the L2 dot products
     buf: Vec<u8>,
@@ -519,6 +521,7 @@ impl Cm {
         let l2n = Mixer::new(NL1, 256, L2LR); // local-counter-confidence combiner
         let l2o = Mixer::new(NL1, 256, L2LR); // word-model-confidence combiner
         let l2p = Mixer::new(NL1, 256, L2LR); // word/mid-order StateMap-confidence combiner
+        let l2q = Mixer::new(NL1, 512, L2LR); // match-consensus combiner
 
         let mut bufsize: u32 = 1;
         while (bufsize as usize) < expected_len + 16 && bufsize < (1 << 27) {
@@ -580,6 +583,8 @@ impl Cm {
             l2n,
             l2o,
             l2p,
+            l2q,
+            consensus: 0,
             l2_in: [0; NL1],
             l2_in64: [0; NL1],
             buf: vec![0u8; bufsize as usize],
@@ -2037,6 +2042,7 @@ impl Cm {
                 }
             }
             let consensus = agree.min(7) | ((expected & 3) << 3) | ((self.bitcount as usize) << 5);
+            self.consensus = consensus;
             self.l1[22 + NGLN_HS + 10].ctx = consensus & (self.l1[22 + NGLN_HS + 10].nctx - 1);
         }
         // delta sign+magnitude selector: the last byte difference bucketed by
@@ -2204,9 +2210,12 @@ impl Cm {
                 | (cb6(self.mix_in[SM_BASE + 13]) << 6))
                 & (self.l2p.nctx - 1)
         };
-        let mut dd = [0i64; 16];
+        // match-consensus combiner: reweight the specialists by the cross-match
+        // agreement state (PR #148's gate signal, one layer up).
+        self.l2q.ctx = self.consensus & (self.l2q.nctx - 1);
+        let mut dd = [0i64; 17];
         {
-            let rows: [&[i32]; 16] = [
+            let rows: [&[i32]; 17] = [
                 {
                     let b = self.l2.ctx * NL1;
                     unsafe { self.l2.w.get_unchecked(b..b + NL1) }
@@ -2271,17 +2280,21 @@ impl Cm {
                     let b = self.l2p.ctx * NL1;
                     unsafe { self.l2p.w.get_unchecked(b..b + NL1) }
                 },
+                {
+                    let b = self.l2q.ctx * NL1;
+                    unsafe { self.l2q.w.get_unchecked(b..b + NL1) }
+                },
             ];
             for i in 0..NL1 {
                 let xi = self.l2_in64[i];
-                for j in 0..16 {
+                for j in 0..17 {
                     dd[j] += unsafe { *rows[j].get_unchecked(i) } as i64 * xi;
                 }
             }
         }
         let mut dsum = 0i32;
-        let mut dv = [0i32; 16];
-        for j in 0..16 {
+        let mut dv = [0i32; 17];
+        for j in 0..17 {
             let mut v = (dd[j] >> 16) as i32;
             if v > 2047 {
                 v = 2047;
@@ -2292,8 +2305,8 @@ impl Cm {
             dv[j] = v;
             dsum += v;
         }
-        let mut prs = [0i32; 16];
-        for j in 0..16 {
+        let mut prs = [0i32; 17];
+        for j in 0..17 {
             let mut pp = squash_d(&self.squash, dv[j]);
             if pp < 1 {
                 pp = 1;
@@ -2319,10 +2332,11 @@ impl Cm {
         self.l2n.pr = prs[13];
         self.l2o.pr = prs[14];
         self.l2p.pr = prs[15];
+        self.l2q.pr = prs[16];
         // Squash the combined logit straight to 16-bit and run the whole SSE/APM
         // chain at 16-bit precision (the calibration tables are ~16-bit), so no
         // stage re-quantizes the probability to the 12-bit 1/4096 grid.
-        let mut p = squash16_d(&self.squash16, dsum / 16);
+        let mut p = squash16_d(&self.squash16, dsum / 17);
         if p < 1 {
             p = 1;
         }
@@ -2474,10 +2488,10 @@ impl Cm {
         // train on the same specialist-logit vector, so load each l2_in[i] once and
         // apply it to all 11 weight rows in one pass. Identical per-row arithmetic.
         {
-            let mut errlr = [0i32; 16];
-            let mut rowp: [*mut i32; 16] = [core::ptr::null_mut::<i32>(); 16];
+            let mut errlr = [0i32; 17];
+            let mut rowp: [*mut i32; 17] = [core::ptr::null_mut::<i32>(); 17];
             {
-                let ms: [&mut Mixer; 16] = [
+                let ms: [&mut Mixer; 17] = [
                     &mut self.l2,
                     &mut self.l2b,
                     &mut self.l2c,
@@ -2494,6 +2508,7 @@ impl Cm {
                     &mut self.l2n,
                     &mut self.l2o,
                     &mut self.l2p,
+                    &mut self.l2q,
                 ];
                 for (j, m) in ms.into_iter().enumerate() {
                     errlr[j] = ((bit << 12) - m.pr) * m.lr;
@@ -2505,7 +2520,7 @@ impl Cm {
             }
             for i in 0..NL1 {
                 let xi = self.l2_in[i];
-                for j in 0..16 {
+                for j in 0..17 {
                     unsafe {
                         let p = rowp[j].add(i);
                         *p = (*p).wrapping_add((xi * errlr[j]) >> 16);
