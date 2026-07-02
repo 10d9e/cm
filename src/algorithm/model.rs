@@ -493,10 +493,10 @@ impl Cm {
             Mixer::new(NINPUT, 1 << GLN_BITS, q), // GLN halfspace specialist
             Mixer::new(NINPUT, 1 << GLN_BITS, q), // GLN: axis-aligned (per-prediction sign) gate
             Mixer::new(NINPUT, 256, q), // GLN: high-level predictor sign-agreement gate
-            Mixer::new(NINPUT, 256, q), // GLN: high-level predictor confidence gate
+            Mixer::new(NINPUT, 2048, q), // GLN: high-level predictor confidence x bitpos gate
             Mixer::new(NINPUT, 256, q), // GLN: local-context (order-N) confidence gate
             Mixer::new(NINPUT, 256, q), // GLN: word-model confidence gate
-            Mixer::new(NINPUT, 256, q), // GLN: bit-history StateMap confidence gate
+            Mixer::new(NINPUT, 2048, q), // GLN: bit-history StateMap confidence x bitpos gate
             Mixer::new(NINPUT, 256, q), // GLN: high-order/structural StateMap confidence gate
             Mixer::new(NINPUT, 256, q), // GLN: fine dual-confidence (CTW + word statemap)
             Mixer::new(NINPUT, 256, q), // difficulty-regime specialist (surprise x bitpos)
@@ -1941,7 +1941,8 @@ impl Cm {
             | (cbucket(self.mix_in[DMC_IN]) << 2)
             | (cbucket(self.mix_in[MM_BASE]) << 4)
             | (cbucket(self.mix_in[MM_BASE + 1]) << 6);
-        self.l1[22 + NGLN_HS + 2].ctx = glngate5 & (self.l1[22 + NGLN_HS + 2].nctx - 1);
+        self.l1[22 + NGLN_HS + 2].ctx = (glngate5 | ((self.bitcount as usize) << 8))
+            & (self.l1[22 + NGLN_HS + 2].nctx - 1);
         // Local-context confidence gate: the confidence of the mid-order direct
         // counters (order-2/3/4/6). Complements the high-level confidence gate —
         // when the local context models are sharp the mixer should weight them
@@ -1967,7 +1968,8 @@ impl Cm {
             | (cbucket(self.mix_in[SM_BASE + 5]) << 2)
             | (cbucket(self.mix_in[SM_BASE + 7]) << 4)
             | (cbucket(self.mix_in[SM_BASE + 11]) << 6);
-        self.l1[22 + NGLN_HS + 5].ctx = glngate10 & (self.l1[22 + NGLN_HS + 5].nctx - 1);
+        self.l1[22 + NGLN_HS + 5].ctx = (glngate10 | ((self.bitcount as usize) << 8))
+            & (self.l1[22 + NGLN_HS + 5].nctx - 1);
         // Word/mid-order StateMap + long-match confidence gate: sharpness of the
         // word-context StateMaps (indices 9/12/13) plus the order-8 match model —
         // a distinct set of contexts from the low-order StateMap gate above.
