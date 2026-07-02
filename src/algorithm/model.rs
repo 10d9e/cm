@@ -295,6 +295,7 @@ pub struct Cm {
     l2q: Mixer,              // seventeenth layer-2 combiner (match-consensus ctx)
     l2r: Mixer,              // eighteenth layer-2 combiner (difficulty-volatility ctx)
     l2s: Mixer,              // nineteenth layer-2 combiner (per-class difficulty ctx)
+    l2t: Mixer,              // twentieth layer-2 combiner (per-class-bigram difficulty ctx)
     consensus: usize,        // match-consensus gate value, stashed for the l2q combiner
     l2_in: [i32; NL1],
     l2_in64: [i64; NL1], // l2_in pre-widened to i64 for the L2 dot products
@@ -549,6 +550,7 @@ impl Cm {
         let l2q = Mixer::new(NL1, 512, L2LR); // match-consensus combiner
         let l2r = Mixer::new(NL1, 128, L2LR); // difficulty-volatility combiner
         let l2s = Mixer::new(NL1, 512, L2LR); // per-class difficulty combiner
+        let l2t = Mixer::new(NL1, 2048, L2LR); // per-class-bigram difficulty combiner
 
         let mut bufsize: u32 = 1;
         while (bufsize as usize) < expected_len + 16 && bufsize < (1 << 27) {
@@ -613,6 +615,7 @@ impl Cm {
             l2q,
             l2r,
             l2s,
+            l2t,
             consensus: 0,
             l2_in: [0; NL1],
             l2_in64: [0; NL1],
@@ -2309,9 +2312,17 @@ impl Cm {
                 | ((self.bitcount as usize) << 6))
                 & (self.l2s.nctx - 1)
         };
-        let mut dd = [0i64; 19];
+        // per-class-bigram difficulty combiner (PR #156's gate signal, one layer up).
+        self.l2t.ctx = {
+            let cp = byte_class(self.c4) | (byte_class(self.c4 >> 8) << 2);
+            (((self.hard_cl2[cp] >> 12).min(15) as usize)
+                | (cp << 4)
+                | ((self.bitcount as usize) << 8))
+                & (self.l2t.nctx - 1)
+        };
+        let mut dd = [0i64; 20];
         {
-            let rows: [&[i32]; 19] = [
+            let rows: [&[i32]; 20] = [
                 {
                     let b = self.l2.ctx * NL1;
                     unsafe { self.l2.w.get_unchecked(b..b + NL1) }
@@ -2388,17 +2399,21 @@ impl Cm {
                     let b = self.l2s.ctx * NL1;
                     unsafe { self.l2s.w.get_unchecked(b..b + NL1) }
                 },
+                {
+                    let b = self.l2t.ctx * NL1;
+                    unsafe { self.l2t.w.get_unchecked(b..b + NL1) }
+                },
             ];
             for i in 0..NL1 {
                 let xi = self.l2_in64[i];
-                for j in 0..19 {
+                for j in 0..20 {
                     dd[j] += unsafe { *rows[j].get_unchecked(i) } as i64 * xi;
                 }
             }
         }
         let mut dsum = 0i32;
-        let mut dv = [0i32; 19];
-        for j in 0..19 {
+        let mut dv = [0i32; 20];
+        for j in 0..20 {
             let mut v = (dd[j] >> 16) as i32;
             if v > 2047 {
                 v = 2047;
@@ -2409,8 +2424,8 @@ impl Cm {
             dv[j] = v;
             dsum += v;
         }
-        let mut prs = [0i32; 19];
-        for j in 0..19 {
+        let mut prs = [0i32; 20];
+        for j in 0..20 {
             let mut pp = squash_d(&self.squash, dv[j]);
             if pp < 1 {
                 pp = 1;
@@ -2439,10 +2454,11 @@ impl Cm {
         self.l2q.pr = prs[16];
         self.l2r.pr = prs[17];
         self.l2s.pr = prs[18];
+        self.l2t.pr = prs[19];
         // Squash the combined logit straight to 16-bit and run the whole SSE/APM
         // chain at 16-bit precision (the calibration tables are ~16-bit), so no
         // stage re-quantizes the probability to the 12-bit 1/4096 grid.
-        let mut p = squash16_d(&self.squash16, dsum / 19);
+        let mut p = squash16_d(&self.squash16, dsum / 20);
         if p < 1 {
             p = 1;
         }
@@ -2602,10 +2618,10 @@ impl Cm {
         // train on the same specialist-logit vector, so load each l2_in[i] once and
         // apply it to all 11 weight rows in one pass. Identical per-row arithmetic.
         {
-            let mut errlr = [0i32; 19];
-            let mut rowp: [*mut i32; 19] = [core::ptr::null_mut::<i32>(); 19];
+            let mut errlr = [0i32; 20];
+            let mut rowp: [*mut i32; 20] = [core::ptr::null_mut::<i32>(); 20];
             {
-                let ms: [&mut Mixer; 19] = [
+                let ms: [&mut Mixer; 20] = [
                     &mut self.l2,
                     &mut self.l2b,
                     &mut self.l2c,
@@ -2625,6 +2641,7 @@ impl Cm {
                     &mut self.l2q,
                     &mut self.l2r,
                     &mut self.l2s,
+                    &mut self.l2t,
                 ];
                 for (j, m) in ms.into_iter().enumerate() {
                     errlr[j] = ((bit << 12) - m.pr) * m.lr;
@@ -2636,7 +2653,7 @@ impl Cm {
             }
             for i in 0..NL1 {
                 let xi = self.l2_in[i];
-                for j in 0..19 {
+                for j in 0..20 {
                     unsafe {
                         let p = rowp[j].add(i);
                         *p = (*p).wrapping_add((xi * errlr[j]) >> 16);
