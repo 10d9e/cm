@@ -50,7 +50,7 @@ const NINPUT: usize = 2 * NCTX + 12 + NRUN;
 const TBITS: u32 = 20; // default per-model context-table size (2^TBITS slots)
 const MIXCTX: usize = 16384;
 const NGLN_HS: usize = 1; // true-halfspace GLN specialists (independent hyperplane sets)
-const NL1: usize = 22 + NGLN_HS + 9; // + difficulty-regime specialist
+const NL1: usize = 22 + NGLN_HS + 10; // + difficulty-regime + CTW-hit-rate specialists
 // GLN-style specialist: gated by GLN_BITS *true* halfspaces over GLN_SEL base
 // predictions. Each gate bit is sign(<fixed pseudo-random ±1 hyperplane, preds>),
 // i.e. a weighted-agreement direction (the Veness GLN gate), not a single sign.
@@ -342,6 +342,8 @@ pub struct Cm {
     c0: i32,
     bitcount: i32,
     hard: i32, // EMA of recent per-bit coding surprise (regime difficulty), 0..65536
+    hard_fast: i32, // fast surprise EMA (~8-bit window) — trend numerator
+    hard_slow: i32, // slow surprise EMA (~128-bit window) — trend baseline
     c4: u32,
     wordhash: u32,
     prevword: u32,
@@ -491,7 +493,8 @@ impl Cm {
             Mixer::new(NINPUT, 256, q), // GLN: bit-history StateMap confidence gate
             Mixer::new(NINPUT, 256, q), // GLN: high-order/structural StateMap confidence gate
             Mixer::new(NINPUT, 256, q), // GLN: fine dual-confidence (CTW + word statemap)
-            Mixer::new(NINPUT, 16, q), // difficulty-regime specialist (recent coding surprise)
+            Mixer::new(NINPUT, 32, q), // difficulty-regime specialist (recent coding surprise)
+            Mixer::new(NINPUT, 32, q), // difficulty-trend specialist (fast vs slow surprise)
         ];
         let l2 = Mixer::new(NL1, 256, L2LR);
         let l2b = Mixer::new(NL1, 256, L2LR);
@@ -639,6 +642,8 @@ impl Cm {
             c0: 1,
             bitcount: 0,
             hard: 0,
+            hard_fast: 0,
+            hard_slow: 0,
             c4: 0,
             wordhash: 0,
             prevword: 0,
@@ -1966,7 +1971,15 @@ impl Cm {
         // surprise (how well the whole ensemble has been predicting lately). A novel
         // meta-signal — no existing selector sees the aggregate recent error, only
         // individual predictor confidence. 16 difficulty levels.
-        self.l1[22 + NGLN_HS + 8].ctx = ((self.hard >> 12).min(15) as usize) & (self.l1[22 + NGLN_HS + 8].nctx - 1);
+        self.l1[22 + NGLN_HS + 8].ctx = ((self.hard >> 11).min(31) as usize) & (self.l1[22 + NGLN_HS + 8].nctx - 1);
+        // Difficulty-trend specialist: fast (~8-bit window) vs slow (~128-bit) EMA
+        // of coding surprise — whether the data is getting harder or easier right
+        // now, and by how much. Captures regime transitions (a new block/format
+        // starting) that the level-only gate cannot distinguish from steady-state.
+        let trend = ((self.hard_fast - self.hard_slow) >> 12).clamp(-4, 3) + 4; // 0..7
+        self.l1[22 + NGLN_HS + 9].ctx = ((((self.hard_slow >> 13).min(3) as usize) << 3)
+            | trend as usize)
+            & (self.l1[22 + NGLN_HS + 9].nctx - 1);
         // delta sign+magnitude selector: the last byte difference bucketed by
         // both sign and coarse magnitude (numeric trend, finer than sign alone).
         let dsm = {
@@ -2218,6 +2231,8 @@ impl Cm {
         // = confidently wrong). Window ~32 bits. Read by the difficulty specialist.
         let surprise = (t - _p).abs();
         self.hard += (surprise - self.hard) >> 5;
+        self.hard_fast += (surprise - self.hard_fast) >> 3;
+        self.hard_slow += (surprise - self.hard_slow) >> 7;
         self.apm1.update(bit);
         self.apm2.update(bit);
         self.apm3.update(bit);
