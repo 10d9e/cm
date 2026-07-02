@@ -513,8 +513,8 @@ impl Cm {
         let l2i = Mixer::new(NL1, 512, L2LR);
         let l2j = Mixer::new(NL1, 256, L2LR);
         let l2k = Mixer::new(NL1, 256, L2LR); // difficulty-regime x bitpos combiner
-        let l2l = Mixer::new(NL1, 256, L2LR); // high-level-confidence combiner
-        let l2m = Mixer::new(NL1, 256, L2LR); // StateMap-confidence combiner
+        let l2l = Mixer::new(NL1, 2048, L2LR); // high-level-confidence x bitpos combiner
+        let l2m = Mixer::new(NL1, 2048, L2LR); // StateMap-confidence x bitpos combiner
         let l2n = Mixer::new(NL1, 256, L2LR); // local-counter-confidence combiner
         let l2o = Mixer::new(NL1, 256, L2LR); // word-model-confidence combiner
         let l2p = Mixer::new(NL1, 256, L2LR); // word/mid-order StateMap-confidence combiner
@@ -2117,7 +2117,8 @@ impl Cm {
             (cb2(self.mix_in[CTW_IN])
                 | (cb2(self.mix_in[DMC_IN]) << 2)
                 | (cb2(self.mix_in[MM_BASE]) << 4)
-                | (cb2(self.mix_in[MM_BASE + 1]) << 6))
+                | (cb2(self.mix_in[MM_BASE + 1]) << 6)
+                | ((self.bitcount as usize) << 8))
                 & (self.l2l.nctx - 1)
         };
         // StateMap-confidence combiner: reweight the specialists by how sharply the
@@ -2128,7 +2129,8 @@ impl Cm {
             (cb3(self.mix_in[SM_BASE + 1])
                 | (cb3(self.mix_in[SM_BASE + 5]) << 2)
                 | (cb3(self.mix_in[SM_BASE + 7]) << 4)
-                | (cb3(self.mix_in[SM_BASE + 11]) << 6))
+                | (cb3(self.mix_in[SM_BASE + 11]) << 6)
+                | ((self.bitcount as usize) << 8))
                 & (self.l2m.nctx - 1)
         };
         // local-counter-confidence combiner: reweight the specialists by how sharp
