@@ -499,7 +499,7 @@ impl Cm {
             Mixer::new(NINPUT, 256, q), // GLN: bit-history StateMap confidence gate
             Mixer::new(NINPUT, 256, q), // GLN: high-order/structural StateMap confidence gate
             Mixer::new(NINPUT, 256, q), // GLN: fine dual-confidence (CTW + word statemap)
-            Mixer::new(NINPUT, 32, q), // difficulty-regime specialist (recent coding surprise)
+            Mixer::new(NINPUT, 256, q), // difficulty-regime specialist (surprise x bitpos)
             Mixer::new(NINPUT, 32, q), // difficulty-trend specialist (fast vs slow surprise)
         ];
         let l2 = Mixer::new(NL1, 256, L2LR);
@@ -1989,7 +1989,9 @@ impl Cm {
         // surprise (how well the whole ensemble has been predicting lately). A novel
         // meta-signal — no existing selector sees the aggregate recent error, only
         // individual predictor confidence. 16 difficulty levels.
-        self.l1[22 + NGLN_HS + 8].ctx = ((self.hard >> 11).min(31) as usize) & (self.l1[22 + NGLN_HS + 8].nctx - 1);
+        self.l1[22 + NGLN_HS + 8].ctx = (((self.hard >> 11).min(31) as usize)
+            | ((self.bitcount as usize) << 5))
+            & (self.l1[22 + NGLN_HS + 8].nctx - 1);
         // Difficulty-trend specialist: fast (~8-bit window) vs slow (~128-bit) EMA
         // of coding surprise — whether the data is getting harder or easier right
         // now, and by how much. Captures regime transitions (a new block/format
