@@ -271,6 +271,7 @@ pub struct Cm {
     l2h: Mixer,              // eighth layer-2 combiner (nesting-state ctx)
     l2i: Mixer,              // ninth layer-2 combiner (byte-above / 2D ctx)
     l2j: Mixer,              // tenth layer-2 combiner (byte-delta / numeric ctx)
+    l2k: Mixer,              // eleventh layer-2 combiner (difficulty-regime ctx)
     l2_in: [i32; NL1],
     l2_in64: [i64; NL1], // l2_in pre-widened to i64 for the L2 dot products
     buf: Vec<u8>,
@@ -506,6 +507,7 @@ impl Cm {
         let l2h = Mixer::new(NL1, 256, L2LR);
         let l2i = Mixer::new(NL1, 512, L2LR);
         let l2j = Mixer::new(NL1, 256, L2LR);
+        let l2k = Mixer::new(NL1, 32, L2LR); // difficulty-regime combiner
 
         let mut bufsize: u32 = 1;
         while (bufsize as usize) < expected_len + 16 && bufsize < (1 << 27) {
@@ -561,6 +563,7 @@ impl Cm {
             l2h,
             l2i,
             l2j,
+            l2k,
             l2_in: [0; NL1],
             l2_in64: [0; NL1],
             buf: vec![0u8; bufsize as usize],
@@ -2082,9 +2085,13 @@ impl Cm {
         self.l2h.ctx = l2hctx & (self.l2h.nctx - 1);
         self.l2i.ctx = l2ictx & (self.l2i.nctx - 1);
         self.l2j.ctx = (l2jctx & 0xff) & (self.l2j.nctx - 1);
-        let mut dd = [0i64; 10];
+        // difficulty-regime combiner: reweight the specialists by how hard the
+        // data has been lately (same 32-level signal as the difficulty specialist,
+        // but applied one layer up, over the specialist logits).
+        self.l2k.ctx = ((self.hard >> 11).min(31) as usize) & (self.l2k.nctx - 1);
+        let mut dd = [0i64; 11];
         {
-            let rows: [&[i32]; 10] = [
+            let rows: [&[i32]; 11] = [
                 {
                     let b = self.l2.ctx * NL1;
                     unsafe { self.l2.w.get_unchecked(b..b + NL1) }
@@ -2125,17 +2132,21 @@ impl Cm {
                     let b = self.l2j.ctx * NL1;
                     unsafe { self.l2j.w.get_unchecked(b..b + NL1) }
                 },
+                {
+                    let b = self.l2k.ctx * NL1;
+                    unsafe { self.l2k.w.get_unchecked(b..b + NL1) }
+                },
             ];
             for i in 0..NL1 {
                 let xi = self.l2_in64[i];
-                for j in 0..10 {
+                for j in 0..11 {
                     dd[j] += unsafe { *rows[j].get_unchecked(i) } as i64 * xi;
                 }
             }
         }
         let mut dsum = 0i32;
-        let mut dv = [0i32; 10];
-        for j in 0..10 {
+        let mut dv = [0i32; 11];
+        for j in 0..11 {
             let mut v = (dd[j] >> 16) as i32;
             if v > 2047 {
                 v = 2047;
@@ -2146,8 +2157,8 @@ impl Cm {
             dv[j] = v;
             dsum += v;
         }
-        let mut prs = [0i32; 10];
-        for j in 0..10 {
+        let mut prs = [0i32; 11];
+        for j in 0..11 {
             let mut pp = squash_d(&self.squash, dv[j]);
             if pp < 1 {
                 pp = 1;
@@ -2167,10 +2178,11 @@ impl Cm {
         self.l2h.pr = prs[7];
         self.l2i.pr = prs[8];
         self.l2j.pr = prs[9];
+        self.l2k.pr = prs[10];
         // Squash the combined logit straight to 16-bit and run the whole SSE/APM
         // chain at 16-bit precision (the calibration tables are ~16-bit), so no
         // stage re-quantizes the probability to the 12-bit 1/4096 grid.
-        let mut p = squash16_d(&self.squash16, dsum / 10);
+        let mut p = squash16_d(&self.squash16, dsum / 11);
         if p < 1 {
             p = 1;
         }
@@ -2318,14 +2330,14 @@ impl Cm {
                 }
             }
         }
-        // Fused layer-2 weight update (same idea as layer-1): the 10 combiners all
-        // train on the same 27-wide logit vector, so load each l2_in[i] once and
-        // apply it to all 10 weight rows in one pass. Identical per-row arithmetic.
+        // Fused layer-2 weight update (same idea as layer-1): the 11 combiners all
+        // train on the same specialist-logit vector, so load each l2_in[i] once and
+        // apply it to all 11 weight rows in one pass. Identical per-row arithmetic.
         {
-            let mut errlr = [0i32; 10];
-            let mut rowp: [*mut i32; 10] = [core::ptr::null_mut::<i32>(); 10];
+            let mut errlr = [0i32; 11];
+            let mut rowp: [*mut i32; 11] = [core::ptr::null_mut::<i32>(); 11];
             {
-                let ms: [&mut Mixer; 10] = [
+                let ms: [&mut Mixer; 11] = [
                     &mut self.l2,
                     &mut self.l2b,
                     &mut self.l2c,
@@ -2336,18 +2348,19 @@ impl Cm {
                     &mut self.l2h,
                     &mut self.l2i,
                     &mut self.l2j,
+                    &mut self.l2k,
                 ];
                 for (j, m) in ms.into_iter().enumerate() {
                     errlr[j] = ((bit << 12) - m.pr) * m.lr;
                     let base = m.ctx * NL1;
-                    // SAFETY: base + NL1 <= w.len(); the 10 rows are in distinct,
+                    // SAFETY: base + NL1 <= w.len(); the 11 rows are in distinct,
                     // non-overlapping, never-resized weight buffers.
                     rowp[j] = unsafe { m.w.as_mut_ptr().add(base) };
                 }
             }
             for i in 0..NL1 {
                 let xi = self.l2_in[i];
-                for j in 0..10 {
+                for j in 0..11 {
                     unsafe {
                         let p = rowp[j].add(i);
                         *p = (*p).wrapping_add((xi * errlr[j]) >> 16);
