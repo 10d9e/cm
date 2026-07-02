@@ -107,7 +107,8 @@ Leaderboard of recorded submissions. Full narratives live in
 | 0100 | 2026-07-01 | @10d9e | 571145 | -176 (new record) | +17.43% | `c85aa19` | [0100](history/entries/0100--10d9e.md) | Adds a 25th layer-1 specialist that extends the GLN gating idea (entries 0098/00… |
 | 0101 | 2026-07-01 | @10d9e | 571118 | -27 (new record) | +17.43% | `dc3b5a5` | [0101](history/entries/0101--10d9e.md) | Deepens the Context Tree Weighting model from DEPTH=48 (6 bytes) to 56 (7 bytes)… |
 | 0102 | 2026-07-01 | @10d9e | 570436 | -682 (new record) | +17.53% | `cdcbbbd` | [0102](history/entries/0102--10d9e.md) | The confidence-gate family (PRs #127-#129) had appeared to saturate, but those a… |
+| 0103 | 2026-07-02 | @10d9e | 569744 | -692 (new record) | +17.63% | `3d25057` | [0103](history/entries/0103--10d9e.md) | Adds a 33rd layer-1 specialist selected by cross-match agreement: at each bit it… |
 
-**Current record: 570436** (@10d9e, entry 0102)
+**Current record: 569744** (@10d9e, entry 0103)
 
 Ledger updates are **CI-only** — see [`.github/workflows/scorekeeper.yml`](.github/workflows/scorekeeper.yml).
