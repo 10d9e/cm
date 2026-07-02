@@ -273,6 +273,7 @@ pub struct Cm {
     l2j: Mixer,              // tenth layer-2 combiner (byte-delta / numeric ctx)
     l2k: Mixer,              // eleventh layer-2 combiner (difficulty-regime ctx)
     l2l: Mixer,              // twelfth layer-2 combiner (high-level confidence ctx)
+    l2m: Mixer,              // thirteenth layer-2 combiner (StateMap confidence ctx)
     l2_in: [i32; NL1],
     l2_in64: [i64; NL1], // l2_in pre-widened to i64 for the L2 dot products
     buf: Vec<u8>,
@@ -510,6 +511,7 @@ impl Cm {
         let l2j = Mixer::new(NL1, 256, L2LR);
         let l2k = Mixer::new(NL1, 32, L2LR); // difficulty-regime combiner
         let l2l = Mixer::new(NL1, 256, L2LR); // high-level-confidence combiner
+        let l2m = Mixer::new(NL1, 256, L2LR); // StateMap-confidence combiner
 
         let mut bufsize: u32 = 1;
         while (bufsize as usize) < expected_len + 16 && bufsize < (1 << 27) {
@@ -567,6 +569,7 @@ impl Cm {
             l2j,
             l2k,
             l2l,
+            l2m,
             l2_in: [0; NL1],
             l2_in64: [0; NL1],
             buf: vec![0u8; bufsize as usize],
@@ -2103,9 +2106,20 @@ impl Cm {
                 | (cb2(self.mix_in[MM_BASE + 1]) << 6))
                 & (self.l2l.nctx - 1)
         };
-        let mut dd = [0i64; 12];
+        // StateMap-confidence combiner: reweight the specialists by how sharply the
+        // order-1/5/7/11 bit-history StateMaps predict (PR #131's -52 gate signal,
+        // one layer up over the specialist logits).
+        self.l2m.ctx = {
+            let cb3 = |v: i32| -> usize { ((v.unsigned_abs() >> 9).min(3)) as usize };
+            (cb3(self.mix_in[SM_BASE + 1])
+                | (cb3(self.mix_in[SM_BASE + 5]) << 2)
+                | (cb3(self.mix_in[SM_BASE + 7]) << 4)
+                | (cb3(self.mix_in[SM_BASE + 11]) << 6))
+                & (self.l2m.nctx - 1)
+        };
+        let mut dd = [0i64; 13];
         {
-            let rows: [&[i32]; 12] = [
+            let rows: [&[i32]; 13] = [
                 {
                     let b = self.l2.ctx * NL1;
                     unsafe { self.l2.w.get_unchecked(b..b + NL1) }
@@ -2154,17 +2168,21 @@ impl Cm {
                     let b = self.l2l.ctx * NL1;
                     unsafe { self.l2l.w.get_unchecked(b..b + NL1) }
                 },
+                {
+                    let b = self.l2m.ctx * NL1;
+                    unsafe { self.l2m.w.get_unchecked(b..b + NL1) }
+                },
             ];
             for i in 0..NL1 {
                 let xi = self.l2_in64[i];
-                for j in 0..12 {
+                for j in 0..13 {
                     dd[j] += unsafe { *rows[j].get_unchecked(i) } as i64 * xi;
                 }
             }
         }
         let mut dsum = 0i32;
-        let mut dv = [0i32; 12];
-        for j in 0..12 {
+        let mut dv = [0i32; 13];
+        for j in 0..13 {
             let mut v = (dd[j] >> 16) as i32;
             if v > 2047 {
                 v = 2047;
@@ -2175,8 +2193,8 @@ impl Cm {
             dv[j] = v;
             dsum += v;
         }
-        let mut prs = [0i32; 12];
-        for j in 0..12 {
+        let mut prs = [0i32; 13];
+        for j in 0..13 {
             let mut pp = squash_d(&self.squash, dv[j]);
             if pp < 1 {
                 pp = 1;
@@ -2198,10 +2216,11 @@ impl Cm {
         self.l2j.pr = prs[9];
         self.l2k.pr = prs[10];
         self.l2l.pr = prs[11];
+        self.l2m.pr = prs[12];
         // Squash the combined logit straight to 16-bit and run the whole SSE/APM
         // chain at 16-bit precision (the calibration tables are ~16-bit), so no
         // stage re-quantizes the probability to the 12-bit 1/4096 grid.
-        let mut p = squash16_d(&self.squash16, dsum / 12);
+        let mut p = squash16_d(&self.squash16, dsum / 13);
         if p < 1 {
             p = 1;
         }
@@ -2353,10 +2372,10 @@ impl Cm {
         // train on the same specialist-logit vector, so load each l2_in[i] once and
         // apply it to all 11 weight rows in one pass. Identical per-row arithmetic.
         {
-            let mut errlr = [0i32; 12];
-            let mut rowp: [*mut i32; 12] = [core::ptr::null_mut::<i32>(); 12];
+            let mut errlr = [0i32; 13];
+            let mut rowp: [*mut i32; 13] = [core::ptr::null_mut::<i32>(); 13];
             {
-                let ms: [&mut Mixer; 12] = [
+                let ms: [&mut Mixer; 13] = [
                     &mut self.l2,
                     &mut self.l2b,
                     &mut self.l2c,
@@ -2369,6 +2388,7 @@ impl Cm {
                     &mut self.l2j,
                     &mut self.l2k,
                     &mut self.l2l,
+                    &mut self.l2m,
                 ];
                 for (j, m) in ms.into_iter().enumerate() {
                     errlr[j] = ((bit << 12) - m.pr) * m.lr;
@@ -2380,7 +2400,7 @@ impl Cm {
             }
             for i in 0..NL1 {
                 let xi = self.l2_in[i];
-                for j in 0..12 {
+                for j in 0..13 {
                     unsafe {
                         let p = rowp[j].add(i);
                         *p = (*p).wrapping_add((xi * errlr[j]) >> 16);
