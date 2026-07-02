@@ -50,7 +50,7 @@ const NINPUT: usize = 2 * NCTX + 12 + NRUN;
 const TBITS: u32 = 20; // default per-model context-table size (2^TBITS slots)
 const MIXCTX: usize = 16384;
 const NGLN_HS: usize = 1; // true-halfspace GLN specialists (independent hyperplane sets)
-const NL1: usize = 22 + NGLN_HS + 12; // + difficulty/trend/volatility + match-consensus specialists
+const NL1: usize = 22 + NGLN_HS + 13; // + difficulty/trend/volatility/per-class + match-consensus specialists
 // GLN-style specialist: gated by GLN_BITS *true* halfspaces over GLN_SEL base
 // predictions. Each gate bit is sign(<fixed pseudo-random ±1 hyperplane, preds>),
 // i.e. a weighted-agreement direction (the Veness GLN gate), not a single sign.
@@ -128,6 +128,21 @@ fn cls4(c4: u32) -> u32 {
 /// reset to a small floor (3), which strongly emphasises recent statistics — an
 /// aggressive recency bias that lets the StateMap track nonstationary data well.
 #[inline]
+/// Coarse char class of a byte (low 8 bits): 0 other, 1 letter, 2 digit, 3 space.
+#[inline]
+fn byte_class(b: u32) -> usize {
+    let b = b & 0xff;
+    if (b >= 97 && b <= 122) || (b >= 65 && b <= 90) {
+        1
+    } else if b >= 48 && b <= 57 {
+        2
+    } else if b == 32 || b == 9 || b == 10 || b == 13 {
+        3
+    } else {
+        0
+    }
+}
+
 fn next_state(s: u8, bit: i32) -> u8 {
     // Asymmetric encoding: with the reset-recency rule the minority count is
     // always small, so pack (sign, big=majority 0..31, small=minority 0..3) to
@@ -354,6 +369,7 @@ pub struct Cm {
     hard_fast: i32, // fast surprise EMA (~8-bit window) — trend numerator
     hard_slow: i32, // slow surprise EMA (~128-bit window) — trend baseline
     hard_vol: i32,  // EMA of |fast - slow| — difficulty volatility (regime churn)
+    hard_cls: [i32; 4], // per-char-class surprise EMAs (other/letter/digit/space)
     c4: u32,
     wordhash: u32,
     prevword: u32,
@@ -507,6 +523,7 @@ impl Cm {
             Mixer::new(NINPUT, 256, q), // difficulty-trend specialist (fast vs slow surprise x bitpos)
             Mixer::new(NINPUT, 512, q), // match-consensus specialist (agreeing matches x expected bit x bitpos)
             Mixer::new(NINPUT, 128, q), // difficulty-volatility specialist (regime churn x bitpos)
+            Mixer::new(NINPUT, 512, q), // per-class difficulty specialist (class-conditional surprise)
         ];
         let l2 = Mixer::new(NL1, 256, L2LR);
         let l2b = Mixer::new(NL1, 256, L2LR);
@@ -674,6 +691,7 @@ impl Cm {
             hard_fast: 0,
             hard_slow: 0,
             hard_vol: 0,
+            hard_cls: [0; 4],
             c4: 0,
             wordhash: 0,
             prevword: 0,
@@ -2067,6 +2085,17 @@ impl Cm {
         self.l1[22 + NGLN_HS + 11].ctx = (((self.hard_vol >> 12).min(15) as usize)
             | ((self.bitcount as usize) << 4))
             & (self.l1[22 + NGLN_HS + 11].nctx - 1);
+        // Per-class difficulty specialist: the surprise EMA CONDITIONED on the
+        // char class of the preceding byte. Captures class-heterogeneous files
+        // ("prose is easy but embedded numbers are hard") that a single global
+        // difficulty EMA averages away. 16 levels x 4 classes x 8 bit positions.
+        {
+            let cc = byte_class(self.c4);
+            self.l1[22 + NGLN_HS + 12].ctx = (((self.hard_cls[cc] >> 12).min(15) as usize)
+                | (cc << 4)
+                | ((self.bitcount as usize) << 6))
+                & (self.l1[22 + NGLN_HS + 12].nctx - 1);
+        }
         // delta sign+magnitude selector: the last byte difference bucketed by
         // both sign and coarse magnitude (numeric trend, finer than sign alone).
         let dsm = {
@@ -2433,6 +2462,8 @@ impl Cm {
         self.hard_slow += (surprise - self.hard_slow) >> 7;
         let gap = (self.hard_fast - self.hard_slow).abs();
         self.hard_vol += (gap - self.hard_vol) >> 5;
+        let hc = &mut self.hard_cls[byte_class(self.c4)];
+        *hc += (surprise - *hc) >> 5;
         self.apm1.update(bit);
         self.apm2.update(bit);
         self.apm3.update(bit);
