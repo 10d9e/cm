@@ -50,7 +50,7 @@ const NINPUT: usize = 2 * NCTX + 12 + NRUN;
 const TBITS: u32 = 20; // default per-model context-table size (2^TBITS slots)
 const MIXCTX: usize = 16384;
 const NGLN_HS: usize = 1; // true-halfspace GLN specialists (independent hyperplane sets)
-const NL1: usize = 22 + NGLN_HS + 7; // + high-order statemap-confidence GLN
+const NL1: usize = 22 + NGLN_HS + 8; // + fine dual-confidence GLN
 // GLN-style specialist: gated by GLN_BITS *true* halfspaces over GLN_SEL base
 // predictions. Each gate bit is sign(<fixed pseudo-random ±1 hyperplane, preds>),
 // i.e. a weighted-agreement direction (the Veness GLN gate), not a single sign.
@@ -489,6 +489,7 @@ impl Cm {
             Mixer::new(NINPUT, 256, q), // GLN: word-model confidence gate
             Mixer::new(NINPUT, 256, q), // GLN: bit-history StateMap confidence gate
             Mixer::new(NINPUT, 256, q), // GLN: high-order/structural StateMap confidence gate
+            Mixer::new(NINPUT, 256, q), // GLN: fine dual-confidence (CTW + word statemap)
         ];
         let l2 = Mixer::new(NL1, 256, L2LR);
         let l2b = Mixer::new(NL1, 256, L2LR);
@@ -1949,6 +1950,15 @@ impl Cm {
             | (cbucket(self.mix_in[MM_BASE + 2]) << 4)
             | (cbucket(self.mix_in[SM_BASE + 13]) << 6);
         self.l1[22 + NGLN_HS + 6].ctx = glngate11 & (self.l1[22 + NGLN_HS + 6].nctx - 1);
+        // Fine dual-confidence gate: 3-bit confidence buckets over the two most
+        // informative predictors (CTW and the order-9 word StateMap) plus the match
+        // sign — a finer partition of the two dominant signals than the coarse gates.
+        let fbucket = |v: i32| -> usize { ((v.unsigned_abs() >> 8).min(7)) as usize };
+        let glngate12 = fbucket(self.mix_in[CTW_IN])
+            | (fbucket(self.mix_in[SM_BASE + 9]) << 3)
+            | (((self.mix_in[MM_BASE] > 0) as usize) << 6)
+            | (((self.mix_in[MM_BASE + 1] > 0) as usize) << 7);
+        self.l1[22 + NGLN_HS + 7].ctx = glngate12 & (self.l1[22 + NGLN_HS + 7].nctx - 1);
         // delta sign+magnitude selector: the last byte difference bucketed by
         // both sign and coarse magnitude (numeric trend, finer than sign alone).
         let dsm = {
