@@ -500,7 +500,7 @@ impl Cm {
             Mixer::new(NINPUT, 256, q), // GLN: high-order/structural StateMap confidence gate
             Mixer::new(NINPUT, 256, q), // GLN: fine dual-confidence (CTW + word statemap)
             Mixer::new(NINPUT, 256, q), // difficulty-regime specialist (surprise x bitpos)
-            Mixer::new(NINPUT, 32, q), // difficulty-trend specialist (fast vs slow surprise)
+            Mixer::new(NINPUT, 256, q), // difficulty-trend specialist (fast vs slow surprise x bitpos)
         ];
         let l2 = Mixer::new(NL1, 256, L2LR);
         let l2b = Mixer::new(NL1, 256, L2LR);
@@ -512,7 +512,7 @@ impl Cm {
         let l2h = Mixer::new(NL1, 256, L2LR);
         let l2i = Mixer::new(NL1, 512, L2LR);
         let l2j = Mixer::new(NL1, 256, L2LR);
-        let l2k = Mixer::new(NL1, 32, L2LR); // difficulty-regime combiner
+        let l2k = Mixer::new(NL1, 256, L2LR); // difficulty-regime x bitpos combiner
         let l2l = Mixer::new(NL1, 256, L2LR); // high-level-confidence combiner
         let l2m = Mixer::new(NL1, 256, L2LR); // StateMap-confidence combiner
         let l2n = Mixer::new(NL1, 256, L2LR); // local-counter-confidence combiner
@@ -1998,7 +1998,8 @@ impl Cm {
         // starting) that the level-only gate cannot distinguish from steady-state.
         let trend = ((self.hard_fast - self.hard_slow) >> 12).clamp(-4, 3) + 4; // 0..7
         self.l1[22 + NGLN_HS + 9].ctx = ((((self.hard_slow >> 13).min(3) as usize) << 3)
-            | trend as usize)
+            | trend as usize
+            | ((self.bitcount as usize) << 5))
             & (self.l1[22 + NGLN_HS + 9].nctx - 1);
         // delta sign+magnitude selector: the last byte difference bucketed by
         // both sign and coarse magnitude (numeric trend, finer than sign alone).
@@ -2105,7 +2106,9 @@ impl Cm {
         // difficulty-regime combiner: reweight the specialists by how hard the
         // data has been lately (same 32-level signal as the difficulty specialist,
         // but applied one layer up, over the specialist logits).
-        self.l2k.ctx = ((self.hard >> 11).min(31) as usize) & (self.l2k.nctx - 1);
+        self.l2k.ctx = (((self.hard >> 11).min(31) as usize)
+            | ((self.bitcount as usize) << 5))
+            & (self.l2k.nctx - 1);
         // high-level-confidence combiner: reweight the specialists by how strongly
         // the long-range predictors (CTW/DMC/two primary matches) commit — the
         // same 256-row signal as the confidence gate specialist, one layer up.
