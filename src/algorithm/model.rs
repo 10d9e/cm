@@ -2026,6 +2026,7 @@ impl Cm {
             let sh8 = 8 - self.bitcount;
             let sh7 = 7 - self.bitcount;
             let mut agree = 0usize;
+            let mut disagree = 0usize;
             let mut expected = 2usize; // 2 = no active match
             for &(ml, pb) in [
                 (self.matchlen, self.predicted_byte),
@@ -2044,10 +2045,18 @@ impl Cm {
                         agree = 1;
                     } else if eb == expected {
                         agree += 1;
+                    } else {
+                        disagree += 1;
                     }
                 }
             }
-            let consensus = agree.min(7) | ((expected & 3) << 3) | ((self.bitcount as usize) << 5);
+            // Split contention (some anchors dissent) from clean consensus: a
+            // 3-in-favor/2-against state is far weaker than 3 unopposed.
+            let consensus = agree.min(7)
+                | (disagree.min(1) << 3)
+                | ((expected & 1) << 4)
+                | (((expected == 2) as usize) << 5)
+                | ((self.bitcount as usize) << 6);
             self.consensus = consensus;
             self.l1[22 + NGLN_HS + 10].ctx = consensus & (self.l1[22 + NGLN_HS + 10].nctx - 1);
         }
