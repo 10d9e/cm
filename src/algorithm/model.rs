@@ -50,7 +50,7 @@ const NINPUT: usize = 2 * NCTX + 12 + NRUN;
 const TBITS: u32 = 20; // default per-model context-table size (2^TBITS slots)
 const MIXCTX: usize = 16384;
 const NGLN_HS: usize = 1; // true-halfspace GLN specialists (independent hyperplane sets)
-const NL1: usize = 22 + NGLN_HS + 10; // + difficulty-regime + CTW-hit-rate specialists
+const NL1: usize = 22 + NGLN_HS + 11; // + difficulty/trend + match-consensus specialists
 // GLN-style specialist: gated by GLN_BITS *true* halfspaces over GLN_SEL base
 // predictions. Each gate bit is sign(<fixed pseudo-random ±1 hyperplane, preds>),
 // i.e. a weighted-agreement direction (the Veness GLN gate), not a single sign.
@@ -501,6 +501,7 @@ impl Cm {
             Mixer::new(NINPUT, 256, q), // GLN: fine dual-confidence (CTW + word statemap)
             Mixer::new(NINPUT, 256, q), // difficulty-regime specialist (surprise x bitpos)
             Mixer::new(NINPUT, 256, q), // difficulty-trend specialist (fast vs slow surprise x bitpos)
+            Mixer::new(NINPUT, 512, q), // match-consensus specialist (agreeing matches x expected bit x bitpos)
         ];
         let l2 = Mixer::new(NL1, 256, L2LR);
         let l2b = Mixer::new(NL1, 256, L2LR);
@@ -2005,6 +2006,39 @@ impl Cm {
             | trend as usize
             | ((self.bitcount as usize) << 5))
             & (self.l1[22 + NGLN_HS + 9].nctx - 1);
+        // Match-consensus specialist: how many of the six match models are active
+        // AND agree with the primary match's next-bit prediction, crossed with that
+        // expected bit. Byte-level agreement between independent match anchors is a
+        // much stronger repeat signal than any single match length.
+        {
+            let sofar = self.c0 - (1 << self.bitcount);
+            let sh8 = 8 - self.bitcount;
+            let sh7 = 7 - self.bitcount;
+            let mut agree = 0usize;
+            let mut expected = 2usize; // 2 = no active match
+            for &(ml, pb) in [
+                (self.matchlen, self.predicted_byte),
+                (self.matchlen2, self.predicted_byte2),
+                (self.matchlen3, self.predicted_byte3),
+                (self.matchlen4, self.predicted_byte4),
+                (self.matchlen5, self.predicted_byte5),
+                (self.matchlen6, self.predicted_byte6),
+            ]
+            .iter()
+            {
+                if ml > 0 && pb >= 0 && sofar == (pb >> sh8) {
+                    let eb = ((pb >> sh7) & 1) as usize;
+                    if expected == 2 {
+                        expected = eb;
+                        agree = 1;
+                    } else if eb == expected {
+                        agree += 1;
+                    }
+                }
+            }
+            let consensus = agree.min(7) | ((expected & 3) << 3) | ((self.bitcount as usize) << 5);
+            self.l1[22 + NGLN_HS + 10].ctx = consensus & (self.l1[22 + NGLN_HS + 10].nctx - 1);
+        }
         // delta sign+magnitude selector: the last byte difference bucketed by
         // both sign and coarse magnitude (numeric trend, finer than sign alone).
         let dsm = {
