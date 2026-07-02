@@ -50,7 +50,7 @@ const NINPUT: usize = 2 * NCTX + 12 + NRUN;
 const TBITS: u32 = 20; // default per-model context-table size (2^TBITS slots)
 const MIXCTX: usize = 16384;
 const NGLN_HS: usize = 1; // true-halfspace GLN specialists (independent hyperplane sets)
-const NL1: usize = 22 + NGLN_HS + 11; // + difficulty/trend + match-consensus specialists
+const NL1: usize = 22 + NGLN_HS + 12; // + difficulty/trend/volatility + match-consensus specialists
 // GLN-style specialist: gated by GLN_BITS *true* halfspaces over GLN_SEL base
 // predictions. Each gate bit is sign(<fixed pseudo-random ±1 hyperplane, preds>),
 // i.e. a weighted-agreement direction (the Veness GLN gate), not a single sign.
@@ -352,6 +352,7 @@ pub struct Cm {
     hard: i32, // EMA of recent per-bit coding surprise (regime difficulty), 0..65536
     hard_fast: i32, // fast surprise EMA (~8-bit window) — trend numerator
     hard_slow: i32, // slow surprise EMA (~128-bit window) — trend baseline
+    hard_vol: i32,  // EMA of |fast - slow| — difficulty volatility (regime churn)
     c4: u32,
     wordhash: u32,
     prevword: u32,
@@ -504,6 +505,7 @@ impl Cm {
             Mixer::new(NINPUT, 256, q), // difficulty-regime specialist (surprise x bitpos)
             Mixer::new(NINPUT, 256, q), // difficulty-trend specialist (fast vs slow surprise x bitpos)
             Mixer::new(NINPUT, 512, q), // match-consensus specialist (agreeing matches x expected bit x bitpos)
+            Mixer::new(NINPUT, 128, q), // difficulty-volatility specialist (regime churn x bitpos)
         ];
         let l2 = Mixer::new(NL1, 256, L2LR);
         let l2b = Mixer::new(NL1, 256, L2LR);
@@ -668,6 +670,7 @@ impl Cm {
             hard: 0,
             hard_fast: 0,
             hard_slow: 0,
+            hard_vol: 0,
             c4: 0,
             wordhash: 0,
             prevword: 0,
@@ -2045,6 +2048,13 @@ impl Cm {
             self.consensus = consensus;
             self.l1[22 + NGLN_HS + 10].ctx = consensus & (self.l1[22 + NGLN_HS + 10].nctx - 1);
         }
+        // Difficulty-volatility specialist: how much the coding difficulty has been
+        // CHURNING lately (EMA of |fast - slow| surprise gap). Steady-hard, steady-
+        // easy, and rapidly-alternating regimes want different blends even at the
+        // same average difficulty. 16 volatility levels x 8 bit positions.
+        self.l1[22 + NGLN_HS + 11].ctx = (((self.hard_vol >> 12).min(15) as usize)
+            | ((self.bitcount as usize) << 4))
+            & (self.l1[22 + NGLN_HS + 11].nctx - 1);
         // delta sign+magnitude selector: the last byte difference bucketed by
         // both sign and coarse magnitude (numeric trend, finer than sign alone).
         let dsm = {
@@ -2399,6 +2409,8 @@ impl Cm {
         self.hard += (surprise - self.hard) >> 5;
         self.hard_fast += (surprise - self.hard_fast) >> 2;
         self.hard_slow += (surprise - self.hard_slow) >> 7;
+        let gap = (self.hard_fast - self.hard_slow).abs();
+        self.hard_vol += (gap - self.hard_vol) >> 5;
         self.apm1.update(bit);
         self.apm2.update(bit);
         self.apm3.update(bit);
