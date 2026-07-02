@@ -494,10 +494,10 @@ impl Cm {
             Mixer::new(NINPUT, 1 << GLN_BITS, q), // GLN: axis-aligned (per-prediction sign) gate
             Mixer::new(NINPUT, 256, q), // GLN: high-level predictor sign-agreement gate
             Mixer::new(NINPUT, 2048, q), // GLN: high-level predictor confidence x bitpos gate
-            Mixer::new(NINPUT, 256, q), // GLN: local-context (order-N) confidence gate
+            Mixer::new(NINPUT, 2048, q), // GLN: local-context confidence x bitpos gate
             Mixer::new(NINPUT, 256, q), // GLN: word-model confidence gate
             Mixer::new(NINPUT, 2048, q), // GLN: bit-history StateMap confidence x bitpos gate
-            Mixer::new(NINPUT, 256, q), // GLN: high-order/structural StateMap confidence gate
+            Mixer::new(NINPUT, 2048, q), // GLN: word/mid StateMap confidence x bitpos gate
             Mixer::new(NINPUT, 256, q), // GLN: fine dual-confidence (CTW + word statemap)
             Mixer::new(NINPUT, 256, q), // difficulty-regime specialist (surprise x bitpos)
             Mixer::new(NINPUT, 256, q), // difficulty-trend specialist (fast vs slow surprise x bitpos)
@@ -1951,7 +1951,8 @@ impl Cm {
             | (cbucket(self.mix_in[3]) << 2)
             | (cbucket(self.mix_in[4]) << 4)
             | (cbucket(self.mix_in[6]) << 6);
-        self.l1[22 + NGLN_HS + 3].ctx = glngate6 & (self.l1[22 + NGLN_HS + 3].nctx - 1);
+        self.l1[22 + NGLN_HS + 3].ctx = (glngate6 | ((self.bitcount as usize) << 8))
+            & (self.l1[22 + NGLN_HS + 3].nctx - 1);
         // Word-model confidence gate: how sharply the word / n-gram context models
         // (word, word-bigram, word-trigram, word-4gram) are predicting. Targets the
         // natural-language files, where the mixer should defer to the word bank when
@@ -1977,7 +1978,8 @@ impl Cm {
             | (cbucket(self.mix_in[SM_BASE + 12]) << 2)
             | (cbucket(self.mix_in[MM_BASE + 2]) << 4)
             | (cbucket(self.mix_in[SM_BASE + 13]) << 6);
-        self.l1[22 + NGLN_HS + 6].ctx = glngate11 & (self.l1[22 + NGLN_HS + 6].nctx - 1);
+        self.l1[22 + NGLN_HS + 6].ctx = (glngate11 | ((self.bitcount as usize) << 8))
+            & (self.l1[22 + NGLN_HS + 6].nctx - 1);
         // Fine dual-confidence gate: 3-bit confidence buckets over the two most
         // informative predictors (CTW and the order-9 word StateMap) plus the match
         // sign — a finer partition of the two dominant signals than the coarse gates.
@@ -2347,7 +2349,7 @@ impl Cm {
         // = confidently wrong). Window ~32 bits. Read by the difficulty specialist.
         let surprise = (t - _p).abs();
         self.hard += (surprise - self.hard) >> 5;
-        self.hard_fast += (surprise - self.hard_fast) >> 3;
+        self.hard_fast += (surprise - self.hard_fast) >> 2;
         self.hard_slow += (surprise - self.hard_slow) >> 7;
         self.apm1.update(bit);
         self.apm2.update(bit);
